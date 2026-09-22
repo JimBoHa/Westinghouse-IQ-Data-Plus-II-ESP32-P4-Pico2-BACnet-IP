@@ -1,0 +1,122 @@
+; Live meter supplies GP0 CLK and GP1 RW. No instruction drives either pin.
+; GP2 DATA and GP3 INT have output-value override LOW. Direction 1 sinks;
+; direction 0 releases. Only one read variant is loaded into PIO0.
+.program live_read_rising
+.side_set 1 opt pindirs
+    pull block          side 1
+    out pindirs, 1      side 1
+    mov x, y
+    nop                 side 0
+bitloop:
+    wait 1 gpio 0
+    jmp pin shift
+    jmp cancelled
+shift:
+    out pindirs, 1      side 1
+    wait 0 gpio 0
+    jmp x-- bitloop
+    irq 0
+park:
+    jmp park
+cancelled:
+    nop                 side 1
+    irq 4
+    jmp park
+
+.program live_read_falling
+.side_set 1 opt pindirs
+    pull block          side 1
+    out pindirs, 1      side 1
+    mov x, y
+    nop                 side 0
+bitloop:
+    wait 1 gpio 0
+    nop                 side 1
+    wait 0 gpio 0
+    jmp pin shift
+    jmp cancelled
+shift:
+    out pindirs, 1
+    jmp x-- bitloop
+    irq 0
+park:
+    jmp park
+cancelled:
+    nop                 side 1
+    irq 4
+    jmp park
+
+; Highest-numbered SM3 in PIO0. Every instruction while RW is LOW or while
+; held writes DATA direction 0. No stalled WAIT is used as a persistent mask.
+.program live_rw_guard
+.side_set 1 opt pindirs
+public armed:
+    wait 0 gpio 1
+    irq 1               side 0
+low:
+    jmp pin high        side 0
+    jmp low             side 0
+high:
+    irq 2               side 0
+public held:
+    mov x, null         side 0
+    pull noblock        side 0
+    mov x, osr          side 0
+    jmp !x held         side 0
+    irq 3
+    jmp armed
+
+; SM2 in PIO0 independently clears INT on read OR write clocks. While CLK is
+; HIGH, every instruction asserts its inactive-low direction, taking priority
+; over the reader's INT writes. This also handles direct writes after completion.
+.program live_int_clear
+.side_set 1 opt pindirs
+low:
+    wait 1 gpio 0
+high:
+    jmp pin high        side 1
+    jmp low             side 1
+
+; PIO1, 31 instructions. IN_BASE=GP0; JMP_PIN=GP1. MOV captures CLK/RW/DATA
+; together. X is remaining capacity (25..0); a 26th edge sets overflow IRQ5.
+; FIFO contains raw right-shifted DATA, then remaining capacity. IRQ6 is raised
+; only after RW HIGH and both FIFO words have been pushed. IRQ7 means ambiguity.
+.program live_write_capture
+    wait 0 gpio 1
+    mov isr, null
+    set x, 25
+    mov osr, pins
+    out y, 1
+    jmp !y rise_search
+    irq 7
+    jmp wait_end
+rise_search:
+    jmp pin end_frame
+    mov osr, pins
+    out y, 1
+    jmp !y rise_search
+    out y, 1
+    jmp !y capture
+    irq 7
+    jmp end_frame
+capture:
+    jmp !x overflow
+    in osr, 1
+    jmp x-- fall_search
+fall_search:
+    jmp pin end_frame
+    mov osr, pins
+    out y, 1
+    jmp !y rise_search
+    jmp fall_search
+overflow:
+    irq 5
+wait_end:
+    wait 1 gpio 1
+end_frame:
+    push block
+    mov isr, x
+    push block
+    irq 6
+park:
+    jmp park

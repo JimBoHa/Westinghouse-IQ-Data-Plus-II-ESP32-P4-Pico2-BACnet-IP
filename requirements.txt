@@ -1,0 +1,2 @@
+-r live/requirements-bacnet.txt
+pyserial==3.5
