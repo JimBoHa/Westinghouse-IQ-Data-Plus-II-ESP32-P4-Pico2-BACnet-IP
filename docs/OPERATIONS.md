@@ -68,7 +68,10 @@ JSON state and are **not trended**. Bounded per-request USB journals remain in
 The complete measurement database can grow around1.6GB/day at this cadence;
 the downloadable snapshot requires a second copy. Actual growth varies.
 
-The snapshot timer uses SQLite's online backup API every5minutes. Download
+The snapshot timer uses SQLite's online backup API hourly, at reduced CPU and I/O
+priority. Each job reports its duration and checks the copy before publishing it.
+The acquisition database still records every measurement attempt. To refresh the
+download early, run `systemctl --user start iqdata-snapshot.service`. Download
 `http://PI_ADDRESS:8080/database`, or copy `iqdata-latest.sqlite`. Do not copy
 only the live `.sqlite` file while its WAL is active. For a fresh snapshot:
 

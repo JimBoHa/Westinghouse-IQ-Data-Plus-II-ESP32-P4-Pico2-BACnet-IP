@@ -121,7 +121,7 @@ The generated settings are:
 | `iqdata-http.service` | Saved telemetry and snapshot download on all IPv4 interfaces, TCP 8080 |
 | `iqdata-bacnet.service` | Read-only BACnet/IP points at the address and instance you supplied |
 | `iqdata-snapshot.service` | Creates a consistent SQLite download with SQLite's backup API |
-| `iqdata-snapshot.timer` | First snapshot after boot delay; refreshes every five minutes |
+| `iqdata-snapshot.timer` | First snapshot after boot delay; refreshes one hour after each completed job |
 
 Diagnostic requests take their own request slots, so some measurement gaps are
 about 2.1 seconds. Diagnostics are current state; they are not added as history
