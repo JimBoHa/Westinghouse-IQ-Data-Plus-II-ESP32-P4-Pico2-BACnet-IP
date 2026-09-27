@@ -15,6 +15,7 @@ typedef struct {
     uint32_t max_loop_us, late_loops, events, valid_writes, malformed_writes;
     uint32_t max_sample_gap_cycles, sample_gap_limit_cycles, sys_hz;
     uint32_t stop, initial_pins, final_pins, requests, completions;
+    uint32_t startup_retries_before, startup_retries_after;
 } live_result_t;
 #define LIVE_EVENT_CAPACITY 4096
 extern live_event_t live_events[LIVE_EVENT_CAPACITY];

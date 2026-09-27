@@ -12,7 +12,7 @@ IQ Data Plus II ── CLK / RW / DATA / INT ── Pico 2 W ── USB ── P
 
 The deployed version was verified against real meter replies and a parallel
 logic analyzer. Metasys discovered the device and its **198 points**. Firmware
-is `0.4.6`; BACnet gateway is `1.1.0`. See [validation](docs/VALIDATION.md).
+is `0.4.7`; BACnet gateway is `1.1.0`. See [validation](docs/VALIDATION.md).
 
 ## Start here
 
