@@ -66,7 +66,9 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual(http[http.index("--port") + 1], "8080")
         self.assertEqual(http[http.index("--database-snapshot") + 1], str(self.data / "iqdata-latest.sqlite"))
         self.assertEqual(command_arguments(units["iqdata-snapshot.service"])[-2:], [str(self.data / "iqdata.sqlite"), str(self.data / "iqdata-latest.sqlite")])
-        self.assertIn("OnUnitActiveSec=5min", units["iqdata-snapshot.timer"])
+        self.assertIn("OnUnitInactiveSec=1h", units["iqdata-snapshot.timer"])
+        self.assertIn("Nice=10", units["iqdata-snapshot.service"])
+        self.assertIn("IOSchedulingClass=idle", units["iqdata-snapshot.service"])
         self.assertIn('%%n $$HOME \\"quoted\\"', units["iqdata-poll.service"])
         for name, unit in units.items():
             self.assertNotIn("/bin/sh", unit)

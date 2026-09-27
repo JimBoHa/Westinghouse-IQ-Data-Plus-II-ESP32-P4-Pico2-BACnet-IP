@@ -7,10 +7,12 @@ import json
 import os
 from pathlib import Path
 import sqlite3
+import time
 import uuid
 
 
 def snapshot(source, destination):
+    started = time.monotonic()
     source, destination = Path(source).resolve(), Path(destination).resolve()
     if source == destination:
         raise ValueError("Snapshot must not overwrite the live database")
@@ -40,7 +42,8 @@ def snapshot(source, destination):
         finally:
             os.close(descriptor)
         return {"snapshot": str(destination), "bytes": destination.stat().st_size,
-                "finished_utc": dt.datetime.now(dt.timezone.utc).isoformat(), "quick_check": "ok"}
+                "finished_utc": dt.datetime.now(dt.timezone.utc).isoformat(), "quick_check": "ok",
+                "duration_seconds": time.monotonic() - started}
     finally:
         if temporary.exists():
             temporary.unlink()

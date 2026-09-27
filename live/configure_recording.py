@@ -32,7 +32,7 @@ METADATA = {
                "derived_readings": "Estimates with method, inputs, and assumptions",
                "scalar_readings": "Combined long view with explicit source",
                "samples": "Wide chronological-analysis view; failed or unavailable values are NULL"},
-    "collection": {"snapshot_interval_seconds": 300,
+    "collection": {"snapshot_interval_seconds": 3600,
                    "download_path": "/database", "telemetry_path": "/telemetry",
                    "diagnostic_trends": False},
 }
