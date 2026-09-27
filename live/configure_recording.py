@@ -8,7 +8,7 @@ from pathlib import Path
 
 METADATA = {
     "meter": {"model": "IQ Data Plus II", "communication_version": 9, "display_verified": False},
-    "acquisition": {"firmware": "0.4.5", "board": "Pico 2 W",
+    "acquisition": {"firmware": "0.4.6", "board": "Pico 2 W",
                     "request": "all_standard_repeat", "address": 0, "interval_seconds": 1.05,
                     "interval_definition": "minimum request-start spacing; interleaved diagnostics make occasional measurement intervals about 2.1 seconds",
                     "configuration_note": "Package defaults; individual attempt timestamps and USB journals are authoritative for imported or reconfigured recordings",

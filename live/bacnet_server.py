@@ -254,7 +254,7 @@ async def run(args):
         objectIdentifier=("device", args.instance), objectName=args.name,
         description="IQ Data Plus II via Pico USB; read-only live meter gateway",
         vendorName="BACpypes / site integration", vendorIdentifier=999,
-        modelName="IQ Data Plus II - Pi 5 Gateway", firmwareRevision="Pico 0.4.5",
+        modelName="IQ Data Plus II - Pi 5 Gateway", firmwareRevision="Pico 0.4.6",
         applicationSoftwareVersion=VERSION, location=args.address, databaseRevision=2,
     )
     network = NetworkPortObject(args.address, objectIdentifier=("networkPort", 1),
@@ -302,7 +302,7 @@ async def run(args):
                 mode = "alternate" if extra_values["CONFIG_ALTERNATE_PF"]["value"] else "standard W/Q"
                 objects[0]["PF"].description = "Meter PF: negative=lagging, positive=leading; " + mode + " calculation selected"
             if quality.get("FIRMWARE_VERSION") and quality.get("FIRMWARE_REVISION"):
-                device.firmwareRevision = "Meter %d rev %d / Pico 0.4.5" % (
+                device.firmwareRevision = "Meter %d rev %d / Pico 0.4.6" % (
                     extra_values["FIRMWARE_VERSION"]["value"], extra_values["FIRMWARE_REVISION"]["value"])
             if healthy != was_healthy:
                 print(json.dumps({"event": "quality", "utc": utc(), "healthy": healthy}), flush=True)

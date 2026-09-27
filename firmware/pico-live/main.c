@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <stdarg.h>
 #include "pico/stdlib.h"
 #include "pico/stdio_usb.h"
 #include "pico/unique_id.h"
@@ -8,14 +9,67 @@
 #include "hardware/watchdog.h"
 #include "hardware/structs/sio.h"
 #include "hardware/structs/io_bank0.h"
+#include "hardware/sync.h"
+#include "tusb.h"
 #include "engine.h"
+#include "usb_tx.h"
 
 static bool report_pending, boot_watchdog;
 static uint32_t deadline_ms, report_mode;
+static uint64_t output_deadline;
+
+static void safe_reboot(void) {
+    live_abort=true;
+    gpio_set_oeover(PIN_DATA,GPIO_OVERRIDE_LOW);
+    gpio_set_oeover(PIN_INT,GPIO_OVERRIDE_LOW);
+    live_release();
+    watchdog_reboot(0,0,1);
+    while (true) tight_loop_contents();
+}
+static void safety_tick(void) {
+    watchdog_update();
+    if (live_active && (int32_t)(to_ms_since_boot(get_absolute_time())-deadline_ms)>0)
+        safe_reboot();
+}
+static bool tx_connected(void *unused) { (void)unused; return stdio_usb_connected(); }
+static uint64_t tx_now(void *unused) { (void)unused; return time_us_64(); }
+static void tx_service(void *unused) {
+    (void)unused;
+    safety_tick();
+    sleep_us(100); /* SDK's USB worker IRQ services transfers between packets. */
+}
+static size_t tx_write(void *unused, const char *data, size_t length) {
+    (void)unused;
+    /* USB runs only on core0. Serialize these short FIFO operations with the
+     * SDK's USB worker IRQ; do not mask interrupts while waiting for space. */
+    uint32_t interrupts=save_and_disable_interrupts();
+    uint32_t accepted=tud_cdc_write(data,(uint32_t)length);
+    tud_cdc_write_flush();
+    restore_interrupts(interrupts);
+    return accepted;
+}
+static const usb_tx_port_t tx_port={NULL,tx_connected,tx_now,tx_write,tx_service};
+static void output_begin(void) { output_deadline=time_us_64()+4000000u; }
+static void usb_printf(const char *format, ...) __attribute__((format(printf,1,2)));
+static void usb_printf(const char *format, ...) {
+    char record[1024];
+    va_list args;
+    va_start(args,format);
+    int length=vsnprintf(record,sizeof record,format,args);
+    va_end(args);
+    if (length<0 || (size_t)length>=sizeof record ||
+        !usb_tx_send(&tx_port,record,(size_t)length,output_deadline)) {
+        /* A partial response must never be followed by a success record.
+         * Re-enumeration clears the broken stream; all meter outputs release. */
+        safe_reboot();
+    }
+}
+#define printf usb_printf
+#define puts(text) usb_printf("%s\n",text)
 static void info(void) {
     char id[2*PICO_UNIQUE_BOARD_ID_SIZE_BYTES+1];
     pico_get_unique_board_id_string(id,sizeof id);
-    printf("{\"type\":\"info\",\"firmware\":\"iqdata-pico-live\",\"version\":\"0.4.5\",\"build_board\":\"%s\",\"id\":\"%s\",\"live_enabled\":true,\"initial_status_hold_clocks\":0,\"framing\":\"classic_27_positions\",\"synthetic_host\":false,\"timing\":\"pio_transaction_core1_observe_int\",\"watchdog_reboot\":%s,\"pins\":{\"CLK\":0,\"RW\":1,\"DATA\":2,\"INT\":3},\"drive\":\"low_or_release\"}\n",LIVE_BOARD,id,boot_watchdog?"true":"false");
+    printf("{\"type\":\"info\",\"firmware\":\"iqdata-pico-live\",\"version\":\"0.4.6\",\"build_board\":\"%s\",\"id\":\"%s\",\"live_enabled\":true,\"initial_status_hold_clocks\":0,\"framing\":\"classic_27_positions\",\"synthetic_host\":false,\"timing\":\"pio_transaction_core1_observe_int\",\"watchdog_reboot\":%s,\"pins\":{\"CLK\":0,\"RW\":1,\"DATA\":2,\"INT\":3},\"drive\":\"low_or_release\"}\n",LIVE_BOARD,id,boot_watchdog?"true":"false");
 }
 static void status(void) {
     printf("{\"type\":\"status\",\"active\":%s,\"pins\":%lu,\"sio_output_enables\":%lu,\"clk_ctrl\":%lu,\"rw_ctrl\":%lu,\"data_ctrl\":%lu,\"int_ctrl\":%lu}\n",live_active?"true":"false",(unsigned long)(sio_hw->gpio_in&15u),(unsigned long)(sio_hw->gpio_oe&15u),(unsigned long)io_bank0_hw->io[0].ctrl,(unsigned long)io_bank0_hw->io[1].ctrl,(unsigned long)io_bank0_hw->io[2].ctrl,(unsigned long)io_bank0_hw->io[3].ctrl);
@@ -32,6 +86,7 @@ static const char *event_name(uint32_t kind) {
     }
 }
 static void report(void) {
+    output_begin();
     for (uint32_t i=0;i<live_result.events;++i) {
         live_event_t *e=&live_events[i];
         printf("{\"type\":\"event\",\"event\":\"%s\",\"us\":%lu,\"clocks\":%lu,\"word\":%lu,\"origin_code\":%lu,\"data_released_during_write\":%s}\n",event_name(e->kind),(unsigned long)e->us,(unsigned long)e->clocks,(unsigned long)e->word,(unsigned long)e->origin,e->kind==EV_WRITE||e->kind==EV_EMPTY_WRITE?"true":"null");
@@ -75,6 +130,7 @@ static bool request_payload(const char *kind,uint32_t address,uint32_t *payload)
     return true;
 }
 static void command(char *line) {
+    output_begin();
     char *part[6]; unsigned count=0; char *save;
     for (char *p=strtok_r(line," ",&save);p;p=strtok_r(NULL," ",&save)) {
         if (count==6) { puts("{\"type\":\"error\",\"error\":\"too_many_arguments\"}"); return; }
@@ -114,22 +170,13 @@ int main(void) {
     live_init(); stdio_init_all(); watchdog_enable(2000,true);
     char line[160]; size_t used=0; bool invalid=false;
     while (true) {
-        watchdog_update();
-        if (live_active && (int32_t)(to_ms_since_boot(get_absolute_time())-deadline_ms)>0) {
-            live_abort=true;
-            // Core1 failed to return from its own finite deadline.
-            // Reboot also resets all peripheral output enables.
-            gpio_set_oeover(PIN_DATA,GPIO_OVERRIDE_LOW);
-            gpio_set_oeover(PIN_INT,GPIO_OVERRIDE_LOW);
-            live_release(); watchdog_reboot(0,0,1);
-            while (true) tight_loop_contents();
-        }
+        safety_tick();
         if (!stdio_usb_connected()) { live_abort=true; used=0; invalid=false; }
         if (report_pending && !live_active) { report_pending=false; report(); }
         int ch=getchar_timeout_us(1000);
         if (ch<0 || ch=='\r') continue;
         if (ch=='\n') {
-            if (invalid) puts("{\"type\":\"error\",\"error\":\"invalid_line\"}");
+            if (invalid) { output_begin(); puts("{\"type\":\"error\",\"error\":\"invalid_line\"}"); }
             else if (used) { line[used]=0; command(line); }
             used=0; invalid=false;
         } else if (ch<32||ch>126||used+1>=sizeof line) invalid=true;
