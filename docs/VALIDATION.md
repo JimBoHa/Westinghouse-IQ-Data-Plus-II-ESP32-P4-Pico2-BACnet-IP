@@ -1,10 +1,10 @@
 # Validation and scope
 
-This repository packages the working Pico0.4.5 / BACnet1.1.0 implementation
+The initial release packaged the working Pico0.4.5 / BACnet1.1.0 implementation
 from an actual IQ Data Plus II installation. Publication changes replace
 site-specific paths, IP defaults and metadata with explicit configuration and
 add the installer/documentation. Firmware source, PIO timing and supplied UF2
-match the deployed version. They were not replaced by a simulated meter.
+matched that deployment. They were not replaced by a simulated meter.
 
 ## Physical and network checks completed
 
@@ -56,3 +56,15 @@ The original raw meter journals, packet captures, site configuration and databas
 are intentionally not in this public repository. The protocol guides link
 manufacturer references; the included tests preserve non-identifying regression
 vectors. See firmware checksums in [SHA256SUMS](../firmware/pico-live/SHA256SUMS).
+
+## Maintenance checks: firmware 0.4.6
+
+The USB delivery update passed native tests for short writes, prolonged reader
+pauses, disconnects and a shared response deadline. The Pico 2 W build used
+SDK 2.3.1. Physical standard reads returned all 18 measurement words with a
+normal reader and with a deliberate 1.2-second reader pause.
+
+The accompanying host fixes passed 86 runtime tests, 10 installer tests and
+five poller self-tests. These include acquisition error preservation, interrupt
+cleanup and independently expiring voltage/frequency settings. The new timer
+waits one hour after each snapshot finishes and uses idle I/O priority.
