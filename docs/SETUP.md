@@ -3,7 +3,7 @@
 This guide installs the USB recorder, read-only HTTP server, BACnet/IP gateway,
 and database snapshot timer as **your normal user's** systemd services. Use a
 Raspberry Pi 5 with 64-bit Raspberry Pi OS, Python 3.11 or newer, an Ethernet
-connection, and a **Pico 2 W (RP2350)**. The supplied firmware is version **0.4.5**,
+connection, and a **Pico 2 W (RP2350)**. The supplied firmware is version **0.4.6**,
 built for `pico2_w`; a first-generation Pico/Pico W (RP2040) is not interchangeable.
 
 Read [WIRING.md](WIRING.md) before connecting the meter. That document covers the
@@ -74,7 +74,7 @@ mkdir -p "$HOME/.local/share/iqdata/state"
 cat "$HOME/.local/share/iqdata/state/info.json"
 ```
 
-Check that the saved response reports firmware **0.4.5** and board/build target
+Check that the saved response reports firmware **0.4.6** and board/build target
 **pico2_w**. The target string describes the build; also check the physical board
 is a Pico 2 W. A failed query or unexpected version must be resolved before
 starting meter collection. Connect the meter using the sequence in

@@ -1,7 +1,7 @@
 # Pico firmware
 
 The supplied `firmware/pico-live/dist/iqdata_pico_live.uf2` is the tested
-**Pico 2 W / RP2350** build, version **0.4.5**. Check the board's printed model.
+**Pico 2 W / RP2350** build, version **0.4.6**. Check the board's printed model.
 It is not an original Pico/Pico W (RP2040) binary. A Pico 2 target can be built
 separately with `-DPICO_BOARD=pico2`; that target has not been physically tested
 in this project. Wi-Fi is unused; the Pi connects by USB.
@@ -29,7 +29,7 @@ Verify the shipped source and image checksums from the repository root:
 cat /tmp/iqdata-info.json
 ```
 
-Check `version: "0.4.5"`, `build_board: "pico2_w"`, `live_enabled: true` and
+Check `version: "0.4.6"`, `build_board: "pico2_w"`, `live_enabled: true` and
 `synthetic_host: false`. The build-board field identifies the firmware target;
 it is not independent identification of the attached hardware.
 Then follow [power order and wiring](WIRING.md).
@@ -71,3 +71,19 @@ Normal acquisition uses `transact all_standard_repeat 0 rising 500` internally.
 Extra reads are `flags_repeat`, `settings_repeat` and `trip_repeat`. Legacy
 ordering probes remain development commands, not normal polling settings.
 No meter settings/reset command is implemented. See [protocol](PROTOCOL.md).
+
+## USB response delivery
+
+Firmware 0.4.6 uses checked USB writes with a four-second deadline for the whole
+response. Short writes resume at the unsent byte while the safety watchdog runs.
+If the host stops reading or disconnects, the firmware releases meter outputs
+and reboots to clear the incomplete stream; an incomplete trial cannot report
+success. The meter transaction's own timing and deadline remain unchanged.
+
+The transport loop has a native test for partial writes, repeated 250 ms reader
+pauses, disconnection and deadline expiry:
+
+```sh
+cc -std=c11 -Wall -Wextra -Werror firmware/pico-live/usb_tx.c firmware/pico-live/test_usb_tx.c -o /tmp/iqdata-test-usb
+/tmp/iqdata-test-usb
+```
