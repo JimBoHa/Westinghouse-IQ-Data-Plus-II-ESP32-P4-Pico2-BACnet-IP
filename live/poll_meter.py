@@ -250,12 +250,15 @@ def poll_once(args, kind, buffers, execute=None, decoder=None):
         report, error = host.saved_json(output)
         if error:
             raise ValueError(f"Cannot read preserved trial summary: {error}")
-        attempt["transport"] = {key: report.get("result", {}).get(key) for key in (
-            "stop_code", "elapsed_us", "malformed_writes", "requests", "completions", "valid_write_lengths")}
         journal = output.with_name(output.name + ".jsonl")
         attempt["evidence_refs"] = [str(output), str(journal)]
         if code != 0:
             raise ValueError(f"USB host failed: {report.get('errors', [])}")
+        result = report.get("result")
+        if not isinstance(result, dict):
+            raise ValueError("USB host completed without a result object")
+        attempt["transport"] = {key: result.get(key) for key in (
+            "stop_code", "elapsed_us", "malformed_writes", "requests", "completions", "valid_write_lengths")}
         words, data_refs = extract_meter_words(report, journal_messages(journal), kind,
                                               args.address, args.edge, args.duration_ms)
         decoded = decoder(kind, words)
