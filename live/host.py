@@ -173,6 +173,7 @@ def execute(args):
               "interpretation": "USB responses and transmitted payloads are raw trial evidence, not validated meter readings."}
     atomic_json(journal.output, report)
     receiver = serial_port = None
+    interrupted = False
     timer = time.monotonic()
     try:
         import serial
@@ -214,6 +215,7 @@ def execute(args):
         if boundary.device_error:
             report["errors"].append("Device returned an error record; see result")
     except (Exception, KeyboardInterrupt) as error:
+        interrupted = isinstance(error, KeyboardInterrupt)
         report["status"] = "failed"
         report["errors"].append(f"{type(error).__name__}: {error}")
         if receiver is not None and args.action in ACTIVE:
@@ -230,6 +232,7 @@ def execute(args):
                     cleanup.accept(message)
                 report["cleanup_response"] = cleanup.terminal
             except (Exception, KeyboardInterrupt) as cleanup_error:
+                interrupted = interrupted or isinstance(cleanup_error, KeyboardInterrupt)
                 report["errors"].append(f"Cleanup {type(cleanup_error).__name__}: {cleanup_error}")
     finally:
         if receiver is not None:
@@ -246,6 +249,10 @@ def execute(args):
         journal.close()
         atomic_json(journal.output, report)
         atomic_json(state / "latest_result.json", report)
+    if interrupted:
+        # Cleanup and evidence are durable before the recorder sees the signal.
+        # A continuous --recover recorder must not treat SIGINT as a retryable read.
+        raise KeyboardInterrupt
     print(json.dumps({"status": report["status"], "transport_complete": report["transport_complete"],
                       "output": str(journal.output), "journal": str(journal.path), "errors": report["errors"]}))
     return 0 if report["status"] == "completed" else 1
