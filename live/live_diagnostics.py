@@ -120,6 +120,27 @@ class DiagnosticAccumulator:
         self.last_rejected_stamp = None
         self.break_continuity = False
 
+    def set_nominals(self, voltage, frequency):
+        """Expire dependent quality immediately, including duplicate samples.
+
+        Unknown or changed settings break only the relevant excursion duration;
+        measurement, demand and energy histories remain independent of settings.
+        """
+        for attribute, value, prefix, nominal in (
+                ("nominal_vll", voltage, "VOLTAGE_EXCURSION", "NOMINAL_VOLTAGE_V"),
+                ("nominal_hz", frequency, "FREQUENCY_EXCURSION", "NOMINAL_FREQUENCY_Hz")):
+            if value is not None and (not _number(value) or value <= 0):
+                raise ValueError(attribute + " must be finite and positive or None")
+            if value == getattr(self, attribute):
+                continue
+            setattr(self, attribute, value)
+            self.durations[prefix][0] = 0.0
+            if self.previous:
+                self.previous["flags"][prefix] = None
+            for key in (nominal, prefix+"_ACTIVE", prefix+"_CONTINUOUS_s", prefix+"_TOTAL_s"):
+                if key in self.last_output:
+                    self.last_output[key].update(valid=False, stale=True)
+
     def _value(self, document, key):
         item = (document.get("readings") or {}).get(key) or {}
         value = item.get("value")
@@ -209,7 +230,8 @@ class DiagnosticAccumulator:
         pf = abs(pf) if pf is not None and abs(pf) <= 1 else None
         energy = energy if energy is not None and 0 <= energy <= 16777215 else None
         flags = {"LOW_PF": pf < self.low_pf_threshold if pf is not None else None,
-                 "FREQUENCY_EXCURSION": abs(frequency-self.nominal_hz) > self.frequency_tolerance_hz if frequency is not None else None,
+                 "FREQUENCY_EXCURSION": abs(frequency-self.nominal_hz) > self.frequency_tolerance_hz
+                 if frequency is not None and self.nominal_hz is not None else None,
                  "VOLTAGE_EXCURSION": any(abs(v-self.nominal_vll) > self.nominal_vll*self.voltage_tolerance_pct/100 for v in voltages)
                  if self.nominal_vll is not None and all(v is not None for v in voltages) else None}
         dt = now-self.previous["time"] if self.previous else None
