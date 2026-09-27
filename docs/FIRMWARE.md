@@ -1,7 +1,7 @@
 # Pico firmware
 
 The supplied `firmware/pico-live/dist/iqdata_pico_live.uf2` is the tested
-**Pico 2 W / RP2350** build, version **0.4.6**. Check the board's printed model.
+**Pico 2 W / RP2350** build, version **0.4.7**. Check the board's printed model.
 It is not an original Pico/Pico W (RP2040) binary. A Pico 2 target can be built
 separately with `-DPICO_BOARD=pico2`; that target has not been physically tested
 in this project. Wi-Fi is unused; the Pi connects by USB.
@@ -29,7 +29,7 @@ Verify the shipped source and image checksums from the repository root:
 cat /tmp/iqdata-info.json
 ```
 
-Check `version: "0.4.6"`, `build_board: "pico2_w"`, `live_enabled: true` and
+Check `version: "0.4.7"`, `build_board: "pico2_w"`, `live_enabled: true` and
 `synthetic_host: false`. The build-board field identifies the firmware target;
 it is not independent identification of the attached hardware.
 Then follow [power order and wiring](WIRING.md).
@@ -74,7 +74,7 @@ No meter settings/reset command is implemented. See [protocol](PROTOCOL.md).
 
 ## USB response delivery
 
-Firmware 0.4.6 uses checked USB writes with a four-second deadline for the whole
+Firmware 0.4.7 uses checked USB writes with a four-second deadline for the whole
 response. Short writes resume at the unsent byte while the safety watchdog runs.
 If the host stops reading or disconnects, the firmware releases meter outputs
 and reboots to clear the incomplete stream; an incomplete trial cannot report
@@ -86,4 +86,18 @@ pauses, disconnection and deadline expiry:
 ```sh
 cc -std=c11 -Wall -Wextra -Werror firmware/pico-live/usb_tx.c firmware/pico-live/test_usb_tx.c -o /tmp/iqdata-test-usb
 /tmp/iqdata-test-usb
+```
+
+## Initial bus synchronization
+
+Firmware 0.4.7 observes a fresh 20 µs idle interval after PIO setup. If RW falls
+before capture has been enabled, it waits for another idle interval within the
+original transaction deadline. It never begins capturing halfway through a
+meter write. Once capture starts, ownership loss still stops the transaction.
+The result includes `startup_retries_before` and `startup_retries_after` counters
+for races before and during writer setup; no BACnet objects are added.
+
+```sh
+cc -std=c11 -Wall -Wextra -Werror firmware/pico-live/test_writer_arm.c -o /tmp/iqdata-test-arm
+/tmp/iqdata-test-arm
 ```

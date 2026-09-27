@@ -68,3 +68,19 @@ The accompanying host fixes passed 86 runtime tests, 10 installer tests and
 five poller self-tests. These include acquisition error preservation, interrupt
 cleanup and independently expiring voltage/frequency settings. The new timer
 waits one hour after each snapshot finishes and uses idle I/O priority.
+
+## Maintenance checks: firmware 0.4.7
+
+Initial synchronization now waits for a fresh idle boundary after setup. Native
+checks cover RW already low, RW falling during setup and recovery at a later
+clean boundary. The physical build passed normal and delayed-reader checks.
+An independent four-second capture at 24 MHz matched all 19 reply words
+(control reply plus 18 measurements) to the USB journal, in order, with no
+malformed writes. This is a bounded capture, not a long-term reliability claim.
+
+After deployment, all 198 BACnet point identifiers, names, descriptions and
+units matched the saved map. Device identity and database revision remained
+unchanged. Confirmed COV subscription, renewal and cancellation passed. A live
+SIGINT during acquisition completed cleanup and exited 130 in 0.064 seconds
+with one attempt and no retry. Rolling points still require their full
+continuous windows after a gateway restart.

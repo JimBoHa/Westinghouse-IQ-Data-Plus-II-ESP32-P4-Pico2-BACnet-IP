@@ -6,6 +6,7 @@
 #include "hardware/structs/sio.h"
 #include "hardware/structs/timer.h"
 #include "live_transport.pio.h"
+#include "writer_arm.h"
 
 #define CLK (1u << PIN_CLK)
 #define RW (1u << PIN_RW)
@@ -125,16 +126,15 @@ static void prepare_reader(uint32_t image,uint32_t shifts) {
     pio_sm_put(pio0,READER,~image);
 }
 
-static bool arm_writer(void) {
-    if (!(sio_hw->gpio_in&RW)) { live_result.stop=STOP_AMBIGUOUS; return false; }
+static bool writer_rw_high(void) { return (sio_hw->gpio_in&RW)!=0; }
+static void writer_reset(void) {
     pio_sm_init(pio1,WRITER,write_offset,&write_config);
     pio_interrupt_clear(pio1,5);
     pio_interrupt_clear(pio1,6);
     pio_interrupt_clear(pio1,7);
-    if (!(sio_hw->gpio_in&RW)) { live_result.stop=STOP_AMBIGUOUS; return false; }
-    pio_sm_set_enabled(pio1,WRITER,true);
-    return true;
 }
+static void writer_enable(void) { pio_sm_set_enabled(pio1,WRITER,true); }
+static const writer_arm_ops_t writer_ops={writer_rw_high,writer_reset,writer_enable};
 
 static void release_guard(void) {
     pio_interrupt_clear(pio0,3);
@@ -161,13 +161,20 @@ void live_pio_run(live_config_t c) {
     bool request_sent=false, completion_pending=false;
     bool repeat_pending=false, repeat_consumed=false;
     init_transport(c.falling);
+    // Setup can span an external clock edge. Establish a new idle observation
+    // instead of using the pre-setup pin sample to decide capture ownership.
+    last_activity=now_us();
+    before=sio_hw->gpio_in&15u;
     while (true) {
         uint32_t now=now_us(), elapsed=now-began, pins=sio_hw->gpio_in&15u;
         uint32_t gap=now-previous;
         previous=now;
         if (gap>live_result.max_loop_us) live_result.max_loop_us=gap;
         if (live_abort) { live_result.stop=STOP_ABORT; break; }
-        if (elapsed>=budget) break;
+        if (elapsed>=budget) {
+            if (!started) live_result.stop=STOP_AMBIGUOUS;
+            break;
+        }
         uint32_t changed=pins^before;
         if (changed&(CLK|RW)) last_activity=now;
         if (pins&CLK) last_activity=now;
@@ -246,7 +253,8 @@ void live_pio_run(live_config_t c) {
             }
             else if (clocks) { ++live_result.malformed_writes; live_result.stop=STOP_BAD_WRITE; break; }
             guard_risen=false;
-            if (!arm_writer()) break;
+            // Once capture has started, ownership loss remains a hard fault.
+            if (writer_arm(&writer_ops)!=WRITER_ARMED) { live_result.stop=STOP_AMBIGUOUS; break; }
             release_guard();
             guard_rearming=true;
         }
@@ -255,8 +263,16 @@ void live_pio_run(live_config_t c) {
             guard_rearming=false;
             guard_armed=true;
         }
-        if (!started && (pins&(CLK|RW))==RW) {
-            if (!arm_writer()) break;
+        if (!started && (pins&(CLK|RW))==RW && now-last_activity>=20u) {
+            writer_arm_result_t armed=writer_arm(&writer_ops);
+            if (armed!=WRITER_ARMED) {
+                if (armed==WRITER_BUSY_BEFORE_RESET) ++live_result.startup_retries_before;
+                else ++live_result.startup_retries_after;
+                // The reader has never run; DATA is still released by the held
+                // guard. Retry only initial synchronization, within budget.
+                last_activity=now;
+                continue;
+            }
             release_guard();
             started=true;
             guard_rearming=true;
