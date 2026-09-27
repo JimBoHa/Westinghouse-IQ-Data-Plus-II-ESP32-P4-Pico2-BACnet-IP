@@ -222,21 +222,23 @@ def auxiliary_readings(state, document, accumulator):
     readings = dict(diagnostic.get("readings", {})) if not error else {}
     # Use actual readable meter configuration for software excursion checks.
     # These are software diagnostic thresholds, separate from meter protection.
-    config_fresh = False
-    try:
-        import datetime as dt
-        stamp = readings["CONFIG_FREQUENCY_Hz"]["observed_utc"]
-        age = (dt.datetime.now(dt.timezone.utc) - dt.datetime.fromisoformat(stamp)).total_seconds()
-        config_fresh = 0 <= age <= 3600
-    except (KeyError, TypeError, ValueError):
-        pass
-    for key, attribute in (("CONFIG_NOMINAL_LL_V", "nominal_vll"),
-                           ("CONFIG_FREQUENCY_Hz", "nominal_hz")):
+    import datetime as dt
+    now = dt.datetime.now(dt.timezone.utc)
+    def nominal(key):
         item = readings.get(key, {})
-        if config_fresh and item.get("valid") is True and item.get("stale") is False:
-            value = item.get("value")
-            if isinstance(value, (int, float)) and math.isfinite(value) and value > 0:
-                setattr(accumulator, attribute, float(value))
+        if not isinstance(item, dict):
+            return None
+        try:
+            age = (now - dt.datetime.fromisoformat(item["observed_utc"])).total_seconds()
+        except (KeyError, TypeError, ValueError):
+            return None
+        value = item.get("value")
+        if (0 <= age <= 3600 and item.get("valid") is True and item.get("stale") is False
+                and isinstance(value, (int, float)) and not isinstance(value, bool)
+                and math.isfinite(value) and value > 0):
+            return float(value)
+        return None
+    accumulator.set_nominals(nominal("CONFIG_NOMINAL_LL_V"), nominal("CONFIG_FREQUENCY_Hz"))
     readings.update(accumulator.update(document))
     health, error = saved_json(state / "poll_health.json")
     if not error:
