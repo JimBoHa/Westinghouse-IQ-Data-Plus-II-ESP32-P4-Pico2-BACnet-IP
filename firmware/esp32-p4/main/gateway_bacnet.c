@@ -2,15 +2,18 @@
  * Adapted from JimBoHa ESP32-P4 Modbus gateway 0729b7b; see ATTRIBUTION.md. */
 #include "gateway_bacnet.h"
 #include "iq_diagnostics.h"
+#include "bacnet_restart.h"
 #include "bip_port.h"
 #include <float.h>
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 #include "bacnet/bacapp.h"
 #include "bacnet/bacdcode.h"
 #include "bacnet/bacstr.h"
 #include "bacnet/cov.h"
+#include "bacnet/datetime.h"
 #include "bacnet/ihave.h"
 #include "bacnet/iam.h"
 #include "bacnet/npdu.h"
@@ -33,6 +36,10 @@ static gateway_bacnet_stats_t stats;
 static char device_name[96], firmware_version[MAX_DEV_VER_LEN + 1], location[MAX_DEV_LOC_LEN + 1];
 static uint64_t now_ms, started_ms, last_timer_ms, last_second_ms, next_announce_ms;
 static uint64_t next_instance_check;
+static uint64_t runtime_uptime,clock_updated_ms,restart_wait_ms;
+static int64_t runtime_utc;
+static bool runtime_ready,restart_wait_started;
+static int32_t device_optional[96];
 static uint8_t receive_buffer[MAX_PDU], transmit_buffer[MAX_PDU];
 typedef struct { bool used; BACNET_OBJECT_TYPE type; uint32_t instance; uint64_t due; } recovery_t;
 static recovery_t recovery[RECOVERY_CAPACITY];
@@ -81,11 +88,22 @@ static void retry_clear(BACNET_OBJECT_TYPE type, uint32_t instance)
         prefix##_Change_Of_Value_Clear(instance); retry_clear(type, instance); }
 COV_WRAPPERS(ai, OBJECT_ANALOG_INPUT, Analog_Input)
 COV_WRAPPERS(bi, OBJECT_BINARY_INPUT, Binary_Input)
+static int device_read_property(BACNET_READ_PROPERTY_DATA *data)
+{
+    if(data&&data->object_property==PROP_RESTART_NOTIFICATION_RECIPIENTS)
+        return bacnet_restart_read_property(data);
+    return Device_Read_Property_Local(data);
+}
+static void device_property_lists(const int32_t **required,const int32_t **optional,const int32_t **proprietary)
+{
+    Device_Property_Lists(required,NULL,proprietary);
+    if(optional)*optional=device_optional;
+}
 static object_functions_t object_table[] = {
     {.Object_Type=OBJECT_DEVICE, .Object_Count=Device_Count,
      .Object_Index_To_Instance=Device_Index_To_Instance, .Object_Valid_Instance=Device_Valid_Object_Instance_Number,
-     .Object_Name=Device_Object_Name, .Object_Read_Property=Device_Read_Property_Local,
-     .Object_Write_Property=read_only, .Object_RPM_List=Device_Property_Lists,
+     .Object_Name=Device_Object_Name, .Object_Read_Property=device_read_property,
+     .Object_Write_Property=read_only, .Object_RPM_List=device_property_lists,
      .Object_Writable_Property_List=no_writable_properties},
     {.Object_Type=OBJECT_ANALOG_INPUT, .Object_Init=Analog_Input_Init, .Object_Count=Analog_Input_Count,
      .Object_Index_To_Instance=Analog_Input_Index_To_Instance, .Object_Valid_Instance=Analog_Input_Valid_Instance,
@@ -106,6 +124,80 @@ static object_functions_t object_table[] = {
      .Object_Writable_Property_List=no_writable_properties},
     {.Object_Type=MAX_BACNET_OBJECT_TYPE}
 };
+
+static BACNET_TIMESTAMP fallback_timestamp(void)
+{
+    BACNET_TIMESTAMP stamp={.tag=TIME_STAMP_DATETIME};
+    datetime_set_date(&stamp.value.dateTime.date,1990,1,1);
+    datetime_set_time(&stamp.value.dateTime.time,0,0,0,0);return stamp;
+}
+static bool utc_datetime(int64_t utc_ms,BACNET_DATE_TIME *out)
+{
+    if(utc_ms<1704067200000LL||utc_ms>=4102444800000LL)return false;
+    time_t seconds=(time_t)(utc_ms/1000);struct tm date;
+    if(!gmtime_r(&seconds,&date))return false;
+    datetime_set_date(&out->date,date.tm_year+1900,date.tm_mon+1,date.tm_mday);
+    datetime_set_time(&out->time,date.tm_hour,date.tm_min,date.tm_sec,(utc_ms%1000)/10);return true;
+}
+static bool restart_resolve(const BACNET_RECIPIENT *recipient,BACNET_ADDRESS *destination,void *context)
+{
+    (void)context;
+    if(recipient->tag!=BACNET_RECIPIENT_TAG_ADDRESS||recipient->type.address.net!=0||recipient->type.address.mac_len!=0)return false;
+    *destination=recipient->type.address;return true;
+}
+static int restart_send(const BACNET_ADDRESS *destination,const uint8_t *apdu,size_t length,void *context)
+{
+    (void)context;BACNET_ADDRESS target=*destination,source={0};BACNET_NPDU_DATA npdu;
+    uint8_t pdu[MAX_PDU];bip_get_my_address(&source);npdu_encode_npdu_data(&npdu,false,MESSAGE_PRIORITY_NORMAL);
+    int offset=npdu_encode_pdu(pdu,&target,&source,&npdu);
+    if(offset<=0||(size_t)offset>sizeof(pdu)||length>sizeof(pdu)-(size_t)offset)return -1;
+    memcpy(pdu+offset,apdu,length);return bip_send_pdu(&target,&npdu,pdu,(unsigned)offset+length);
+}
+static bool restart_initialize(void)
+{
+    const int32_t *optional=NULL;Device_Property_Lists(NULL,&optional,NULL);unsigned count=0;
+    while(optional&&optional[count]!=-1) {
+        if(count>=sizeof(device_optional)/sizeof(device_optional[0])-2)return false;
+        device_optional[count]=optional[count];++count;
+    }
+    device_optional[count++]=PROP_RESTART_NOTIFICATION_RECIPIENTS;device_optional[count]=-1;
+    BACNET_TIMESTAMP fallback=fallback_timestamp();
+    datetime_utc_offset_minutes_set(0);datetime_dst_enabled_set(false);
+    datetime_timesync(&fallback.value.dateTime.date,&fallback.value.dateTime.time,false);
+    Device_Set_Time_Of_Restart(&fallback);Device_Last_Restart_Reason_Set(config.restart_reason);
+    const bacnet_restart_callbacks_t callbacks={.resolve=restart_resolve,.send=restart_send};
+    /* A read-only recipient property is permitted with the standard default. */
+    bacnet_restart_init(BACNET_RESTART_LOAD_MISSING,NULL,0,NULL,config.restart_reason,&callbacks,NULL);
+    runtime_ready=restart_wait_started=false;runtime_uptime=clock_updated_ms=restart_wait_ms=0;runtime_utc=0;
+    return true;
+}
+void gateway_bacnet_runtime(uint64_t uptime_ms,int64_t utc_ms,bool startup_ready)
+{ runtime_uptime=uptime_ms;runtime_utc=utc_ms;runtime_ready=startup_ready; }
+static void restart_tick(void)
+{
+    BACNET_DATE_TIME current;
+    if(utc_datetime(runtime_utc,&current)&&(!clock_updated_ms||now_ms-clock_updated_ms>=1000)) {
+        datetime_timesync(&current.date,&current.time,false);clock_updated_ms=now_ms;
+    }
+    bool ready=runtime_ready&&stats.link_up;
+    if(ready&&!stats.restart_timestamp_frozen) {
+        if(!restart_wait_started) { restart_wait_started=true;restart_wait_ms=now_ms; }
+        BACNET_TIMESTAMP stamp=fallback_timestamp();
+        bool valid=runtime_utc>0&&runtime_uptime<=(uint64_t)runtime_utc&&
+            utc_datetime(runtime_utc-(int64_t)runtime_uptime,&stamp.value.dateTime);
+        if(valid||now_ms-restart_wait_ms>=5000) {
+            if(bacnet_restart_set_timestamp_before_ready(&stamp)) {
+                Device_Set_Time_Of_Restart(&stamp);stats.restart_timestamp_frozen=true;stats.restart_clock_valid=valid;
+                stats.restart_boot_utc_ms=valid?runtime_utc-(int64_t)runtime_uptime:0;
+                iq_event("bacnet","restart_timestamp",0,valid?"Frozen NTP boot timestamp":"Frozen unsynchronized 1990 fallback timestamp");
+            }
+        }
+    }
+    bacnet_restart_tick(now_ms,ready,config.device_instance,Device_System_Status());
+    bacnet_restart_stats_t state;bacnet_restart_stats_get(&state);
+    stats.restart_sent=state.notifications_sent;stats.restart_failures=state.send_failures;
+    stats.restart_exhausted=state.exhausted_recipients;
+}
 
 static void observe_i_am(uint8_t *data,uint16_t length,BACNET_ADDRESS *source)
 {
@@ -271,6 +363,7 @@ bool gateway_bacnet_init(const gateway_bacnet_config_t *input, uint64_t timestam
     Device_Set_Firmware_Revision(firmware_version, strlen(firmware_version));
     Device_Set_Application_Software_Version(firmware_version, strlen(firmware_version));
     Device_Set_System_Status(STATUS_OPERATIONAL, true);
+    if(!restart_initialize()) { gateway_bacnet_shutdown();return false; }
     for (size_t i = 0; i < config.point_count; ++i) {
         if (!create_point(&config.points[i])) { gateway_bacnet_shutdown(); return false; }
     }
@@ -333,6 +426,7 @@ void gateway_bacnet_tick(uint64_t timestamp)
     if (!stats.initialized) { return; }
     if (timestamp < now_ms) { return; } /* Caller supplies monotonic milliseconds. */
     now_ms = timestamp;
+    restart_tick();
     uint64_t delta = now_ms - last_timer_ms;
     if (delta) {
         /* TSM accepts 16-bit elapsed time. A delayed task needs only enough
