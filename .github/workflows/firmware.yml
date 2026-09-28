@@ -1,0 +1,127 @@
+name: Firmware CI
+on:
+  pull_request:
+    branches: [esp32-p4-pico2-port]
+  push:
+    branches: [esp32-p4-pico2-port]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: firmware-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  native:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      CC: clang
+      CXX: clang++
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          persist-credentials: false
+      - name: Point map, native sanitizers, host tooling, and browser syntax
+        run: |
+          python3 firmware/esp32-p4/tools/generate_points.py --check
+          cmake -S firmware/esp32-p4/tests -B build/native -G Ninja
+          cmake --build build/native --parallel 2
+          ctest --test-dir build/native --output-on-failure
+          node --check firmware/esp32-p4/main/web/dashboard.js
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: native-guard
+          path: build/native/uf2_guard
+          if-no-files-found: error
+          retention-days: 14
+  esp32:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - flavor: application
+            recovery: 'OFF'
+          - flavor: recovery
+            recovery: 'ON'
+    container:
+      image: espressif/idf:v5.5.5@sha256:a9231d0697ab8f7517cc072e93b7c83e04907bfbfba80b6440d7dbbf90665cf2
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          persist-credentials: false
+      - name: Build pinned ESP32-P4 ${{ matrix.flavor }}
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git config --global --add safe.directory "$GITHUB_WORKSPACE/firmware/esp32-p4/third_party/bacnet-stack"
+          git config --global --add safe.directory "$GITHUB_WORKSPACE/firmware/esp32-p4/third_party/cJSON"
+          source "$IDF_PATH/export.sh"
+          idf.py -C firmware/esp32-p4 -B build/p4 -DIQ_RECOVERY_BUILD=${{ matrix.recovery }} build
+          python3 firmware/esp32-p4/tools/record_build.py ${{ matrix.flavor }} build/p4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: p4-${{ matrix.flavor }}
+          path: |
+            build/p4/iqdata_p4_gateway.bin
+            build/p4/build-metadata.json
+            build/p4/bootloader/bootloader.bin
+            build/p4/partition_table/partition-table.bin
+            build/p4/ota_data_initial.bin
+          if-no-files-found: error
+          retention-days: 14
+  pico:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          persist-credentials: false
+      - name: Install checksum-pinned Arm GNU and Pico SDK
+        run: python3 firmware/esp32-p4/tools/prepare_pico_ci.py
+      - name: Build plain Pico 2 and record provenance
+        run: |
+          cmake -S firmware/pico-live -B build/pico2 -G Ninja -DPICO_BOARD=pico2 -DCMAKE_BUILD_TYPE=Release -DPICOTOOL_GIT_BRANCH=2041936441b48a3cc53ae3da9e805229fe8f4e18
+          cmake --build build/pico2 --parallel 2
+          python3 firmware/esp32-p4/tools/record_build.py pico2 build/pico2
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: pico2
+          path: |
+            build/pico2/iqdata_pico_live.uf2
+            build/pico2/build-metadata.json
+          if-no-files-found: error
+          retention-days: 14
+  package:
+    needs: [native, esp32, pico]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          path: build/release-input
+      - name: Verify matching images and package unsigned CI candidate
+        run: |
+          chmod +x build/release-input/native-guard/uf2_guard
+          python3 firmware/esp32-p4/tools/package_release.py build --p4-build build/release-input/p4-application --recovery-build build/release-input/p4-recovery --pico-build build/release-input/pico2 --uf2-guard build/release-input/native-guard/uf2_guard --output build/iqdata-ci-candidate.zip
+          python3 firmware/esp32-p4/tools/package_release.py verify build/iqdata-ci-candidate.zip
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: iqdata-candidate-${{ github.event.pull_request.head.sha || github.sha }}
+          path: build/iqdata-ci-candidate.zip
+          if-no-files-found: error
+          retention-days: 30
