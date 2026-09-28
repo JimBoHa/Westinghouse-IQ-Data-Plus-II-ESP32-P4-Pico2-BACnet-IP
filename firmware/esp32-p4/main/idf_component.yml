@@ -1,0 +1,5 @@
+dependencies:
+  espressif/usb_host_msc: "==1.1.4"
+  espressif/mdns: "==1.9.1"
+  idf: "==5.5.5"
+  espressif/usb_host_cdc_acm: "==2.4.1"

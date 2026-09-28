@@ -1,4 +1,16 @@
-# Westinghouse IQ Data Plus II to BACnet IP
+# Westinghouse IQ Data Plus II: ESP32-P4 + Pico 2 BACnet/IP port
+
+This derived repository adds a standalone **ESP32-P4 + plain Pico 2** target,
+with Ethernet management and firmware updates for both boards. Start with the
+[P4 build, wiring and commissioning guide](firmware/esp32-p4/README.md) and
+[P4 validation status](firmware/esp32-p4/VALIDATION.md). The P4 uses bounded RAM
+for calculations and NVS for commissioning; it does not run a local database.
+
+The original Raspberry Pi implementation and history remain below as the
+reference. Its deployment evidence applies to that original installation,
+not automatically to the new P4/plain-Pico-2 meter connection.
+
+## Original Raspberry Pi implementation
 
 Read a Westinghouse **IQ Data Plus II** meter through its proprietary local
 interface, then expose measurements and diagnostics through a Raspberry Pi 5

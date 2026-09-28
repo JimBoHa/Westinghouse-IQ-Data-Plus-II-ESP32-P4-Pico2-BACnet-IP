@@ -1,0 +1,6 @@
+[submodule "firmware/esp32-p4/third_party/bacnet-stack"]
+	path = firmware/esp32-p4/third_party/bacnet-stack
+	url = https://github.com/bacnet-stack/bacnet-stack.git
+[submodule "firmware/esp32-p4/third_party/cJSON"]
+	path = firmware/esp32-p4/third_party/cJSON
+	url = https://github.com/DaveGamble/cJSON.git
