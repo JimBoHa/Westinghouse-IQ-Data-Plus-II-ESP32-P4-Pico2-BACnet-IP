@@ -1,5 +1,10 @@
 # Third-party notices
 
+The ESP32-P4 target's pinned BACnet Stack, ESP-IDF components, USB host drivers,
+and reused gateway code are documented in
+[P4 source provenance](firmware/esp32-p4/ATTRIBUTION.md). Preserve the submodules'
+license directories and the reused source notices when distributing this port.
+
 The supplied UF2 was built with Raspberry Pi Pico SDK2.3.1. Notices for its
 SDK, TinyUSB, printf and toolchain components are retained under `third_party/`.
 These licenses describe those components; they do not grant additional rights
