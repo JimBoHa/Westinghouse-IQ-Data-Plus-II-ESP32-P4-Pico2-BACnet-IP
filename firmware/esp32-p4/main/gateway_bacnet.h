@@ -38,6 +38,10 @@ typedef struct {
     bool initialized, link_up;
     uint32_t received_packets, good_points, fault_points;
     uint32_t cov_timeouts, cov_refreshes, cov_pending;
+    uint32_t instance_checks, instance_conflicts, conflict_ip;
+    uint16_t conflict_port, conflict_network;
+    uint64_t last_conflict_ms;
+    bool instance_check_complete;
 } gateway_bacnet_stats_t;
 
 /* All functions belong to one BACnet task. Caller snapshots meter state
