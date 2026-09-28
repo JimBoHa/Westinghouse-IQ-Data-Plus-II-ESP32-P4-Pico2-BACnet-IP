@@ -60,6 +60,9 @@ jobs:
           persist-credentials: false
       - name: Build pinned ESP32-P4 ${{ matrix.flavor }}
         run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git config --global --add safe.directory "$GITHUB_WORKSPACE/firmware/esp32-p4/third_party/bacnet-stack"
+          git config --global --add safe.directory "$GITHUB_WORKSPACE/firmware/esp32-p4/third_party/cJSON"
           source "$IDF_PATH/export.sh"
           idf.py -C firmware/esp32-p4 -B build/p4 -DIQ_RECOVERY_BUILD=${{ matrix.recovery }} build
           python3 firmware/esp32-p4/tools/record_build.py ${{ matrix.flavor }} build/p4
