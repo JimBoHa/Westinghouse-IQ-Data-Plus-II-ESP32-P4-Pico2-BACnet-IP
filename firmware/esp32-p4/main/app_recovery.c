@@ -1,6 +1,7 @@
 /* Optional small Ethernet recovery image. No meter requests or USB resets. */
 #include "iq_management.h"
 #include "iq_health.h"
+#include "iq_security.h"
 #include "iq_config.h"
 #include <stdio.h>
 #include <string.h>
@@ -44,6 +45,7 @@ cJSON *iq_status_json(void)
     cJSON_AddNumberToObject(j,"uptime_seconds",esp_timer_get_time()/1000000.0);
     cJSON_AddNumberToObject(j,"free_heap",esp_get_free_heap_size());
     cJSON_AddItemToObject(j,"config",iq_config_json(&settings));
+    cJSON_AddItemToObject(j,"security",iq_security_json());
     char hash[65];for(unsigned i=0;i<32;++i)snprintf(hash+2*i,3,"%02x",app->app_elf_sha256[i]);
     cJSON_AddStringToObject(j,"elf_sha256",hash);
     esp_netif_ip_info_t ip={0};(void)esp_netif_get_ip_info(netif,&ip);char address[16];
@@ -93,6 +95,6 @@ void app_main(void)
         ESP_ERROR_CHECK(esp_netif_str_to_ip4(settings.gateway,&ip.gw));ESP_ERROR_CHECK(esp_netif_set_ip_info(netif,&ip));
     }
     ESP_ERROR_CHECK(esp_eth_start(handle));ESP_ERROR_CHECK(mdns_init());ESP_ERROR_CHECK(mdns_hostname_set(hostname));
-    ESP_ERROR_CHECK(mdns_service_add(NULL,"_http","_tcp",80,NULL,0));iq_web_start();
+    ESP_ERROR_CHECK(mdns_service_add(NULL,"_https","_tcp",443,NULL,0));iq_security_init(token,mac_text);iq_web_start();
     iq_health_start(iq_web_ready);
 }

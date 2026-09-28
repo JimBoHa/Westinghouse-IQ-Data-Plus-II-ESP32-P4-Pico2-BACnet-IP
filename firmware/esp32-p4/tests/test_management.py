@@ -1,87 +1,65 @@
 #!/usr/bin/env python3
-"""Negative management tests; invalid requests must not reboot or alter devices."""
+"""Physical HTTPS/auth/signature rejection tests. No valid image is activated."""
 import argparse
 import hashlib
-import ipaddress
 import json
 from pathlib import Path
-import urllib.error
-import urllib.request
+import subprocess
+import sys
+import time
+sys.path.insert(0,str(Path(__file__).resolve().parents[1]/"tools"))
+from gateway_client import Gateway, auth_headers, image_signature
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--target", required=True, type=ipaddress.IPv4Address)
-    parser.add_argument("--expected-mac", required=True)
-    parser.add_argument("--token-file", required=True, type=Path)
-    parser.add_argument("--app-bin", required=True, type=Path)
-    parser.add_argument("--pico-uf2", required=True, type=Path)
-    parser.add_argument("--output", required=True, type=Path)
-    args = parser.parse_args()
-    if str(args.target) == "192.168.75.151" or not args.target.is_private:
-        parser.error("Use only the identified development gateway on the private LAN")
-    if args.token_file.stat().st_mode & 0o077:
-        parser.error("Token file must have mode 0600")
-    token = args.token_file.read_text().strip()
-    assert len(token) == 64 and all(c in "0123456789abcdef" for c in token)
-    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    p=argparse.ArgumentParser(description=__doc__)
+    for name in ("target","expected-mac","token-file","pin-file","app-bin","pico-uf2","output"):
+        p.add_argument("--"+name,required=True)
+    p.add_argument("--signing-key-file",type=Path)
+    p.add_argument("--expiry",action="store_true")
+    a=p.parse_args();client=Gateway(a.target,a.pin_file,a.token_file,a.expected_mac)
+    before=client.status();assert before["pico"]["qualified"]
+    checks={}
+    def send(name,path,body,expected,headers):
+        code,reply,_=client.raw(path,body,headers,timeout=150)
+        assert code==expected,(name,code,reply[:200])
+        checks[name]={"http_status":code}
+    def headers(path,body,digest=None,key=None):
+        nonce=client.request("/api/auth/challenge")["nonce"]
+        return auth_headers(client.key if key is None else key,path,nonce,body,digest)
+    def sign(target,body):
+        context=f"IQDATA-IMAGE-V1\n{target}\n{len(body)}\n{hashlib.sha256(body).hexdigest()}\n".encode()
+        return subprocess.check_output(["openssl","dgst","-sha256","-sign",str(a.signing_key_file)],input=context).hex()
+    path="/api/auth/check"
+    send("missing_authentication",path,b"",401,{})
+    h=headers(path,b"");wrong=dict(h);wrong["X-IQ-Auth"]="00"*32
+    send("wrong_key",path,b"",401,wrong)
+    send("valid_after_bad_guess",path,b"",200,h)
+    send("replay_rejected",path,b"",401,h)
+    send("path_bound",'/api/config',b"",401,headers(path,b""))
+    body=b'{ }';send("body_hash_bound",'/api/config',body,400,headers('/api/config',body,hashlib.sha256(b'{}').hexdigest()))
+    app,app_signature=image_signature(a.app_bin,'esp32p4');pico,pico_signature=image_signature(a.pico_uf2,'pico2')
+    send("unsigned_p4",'/api/firmware',app,400,headers('/api/firmware',app))
+    send("unsigned_pico",'/api/pico/firmware',pico,400,headers('/api/pico/firmware',pico))
+    send("target_bound_signature",'/api/firmware',pico,400,headers('/api/firmware',pico)|pico_signature)
+    modified=bytearray(pico);modified[-1]^=1
+    send("pico_received_hash",'/api/pico/firmware',modified,400,headers('/api/pico/firmware',modified,hashlib.sha256(pico).hexdigest())|pico_signature)
+    if a.signing_key_file:
+        assert not a.signing_key_file.stat().st_mode&0o077
+        wrong_project=bytearray(app[:512]);wrong_project[80:112]=b'unrelated-project'.ljust(32,b'\0')
+        send("wrong_p4_project",'/api/firmware',wrong_project,400,headers('/api/firmware',wrong_project)|{"X-Image-Signature":sign('esp32p4',wrong_project)})
+        wrong_family=bytearray(pico);offset=512 if int.from_bytes(pico[8:12],'little')==0xa000 else 0
+        wrong_family[offset+28:offset+32]=b'\xff'*4
+        send("wrong_pico_family",'/api/pico/firmware',wrong_family,400,headers('/api/pico/firmware',wrong_family)|{"X-Image-Signature":sign('pico2',wrong_family)})
+    invalid=b'{"device_instance":75151,"name":"Forbidden"}'
+    send("protected_configuration",'/api/config',invalid,400,headers('/api/config',invalid))
+    if a.expiry:
+        expired=headers(path,b'');time.sleep(61)
+        send("expired_nonce",path,b'',401,expired)
+    after=client.status();assert after['uptime_seconds']>=before['uptime_seconds']
+    for key in ('config','version','elf_sha256','ota'):assert after[key]==before[key],key
+    assert after['pico']['qualified'] and after['pico']['connections']==before['pico']['connections']
+    report={'passed':True,'checks':checks,'configuration_and_boot_unchanged':True,'pico_connection_unchanged':True}
+    Path(a.output).write_text(json.dumps(report,indent=2)+'\n');print(json.dumps(report,indent=2))
 
-    def request(path, payload=None, headers=None):
-        req = urllib.request.Request(f"http://{args.target}{path}", data=payload, headers=headers or {})
-        try:
-            with opener.open(req, timeout=20) as response:
-                return response.status, response.read()
-        except urllib.error.HTTPError as error:
-            return error.code, error.read(1024)
-
-    def status():
-        code, body = request("/api/status")
-        assert code == 200
-        state = json.loads(body)
-        assert state["project"] == "iqdata_p4_gateway"
-        assert state["ethernet_mac"].lower() == args.expected_mac.lower()
-        assert state["config"]["device_instance"] != 75151
-        return state
-
-    before = status()
-    assert before["pico"]["qualified"], "Qualify the Pico before running these tests"
-    checks = {}
-
-    def reject(name, path, payload, expected=400, valid_token=True, digest=None):
-        headers = {"Content-Type": "application/octet-stream",
-                   "X-SHA256": digest or hashlib.sha256(payload).hexdigest()}
-        if valid_token:
-            headers["Authorization"] = "Bearer " + token
-        code, body = request(path, payload, headers)
-        assert code == expected, (name, code, body)
-        checks[name] = {"http_status": code, "reason": body.decode(errors="replace")}
-
-    pico = args.pico_uf2.read_bytes()
-    app = args.app_bin.read_bytes()
-    reject("missing_authentication", "/api/pico/firmware", pico[:1024], expected=401, valid_token=False)
-    wrong_project = bytearray(app[:512])
-    # ESP image+segment headers (32) + esp_app_desc_t project_name offset (48).
-    wrong_project[80:112] = b"unrelated-project".ljust(32, b"\0")
-    reject("wrong_p4_project", "/api/firmware", wrong_project)
-    reject("pico_digest_mismatch", "/api/pico/firmware", pico, digest="0" * 64)
-    wrong_family = bytearray(pico)
-    offset = 512 if int.from_bytes(pico[8:12], "little") == 0xa000 else 0
-    wrong_family[offset+28:offset+32] = b"\xff" * 4
-    reject("wrong_pico_family", "/api/pico/firmware", wrong_family)
-    reject("truncated_uf2", "/api/pico/firmware", pico[:-1])
-    reject("invalid_configuration", "/api/config", b'{"device_instance":75151,"name":"Forbidden"}')
-    after = status()
-    assert after["uptime_seconds"] >= before["uptime_seconds"], "Gateway rebooted"
-    for key in ("config", "version", "elf_sha256", "ota"):
-        assert after[key] == before[key], key
-    assert after["pico"]["qualified"]
-    assert after["pico"]["connections"] == before["pico"]["connections"], "Pico was reset by a rejected upload"
-    report = {"passed": True, "checks": checks, "configuration_and_boot_unchanged": True,
-              "pico_connection_unchanged": True}
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(json.dumps(report, indent=2) + "\n")
-    print(json.dumps(report, indent=2))
-
-
-if __name__ == "__main__":
-    main()
+if __name__=='__main__':main()
