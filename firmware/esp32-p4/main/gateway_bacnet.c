@@ -12,6 +12,7 @@
 #include "bacnet/bacstr.h"
 #include "bacnet/cov.h"
 #include "bacnet/ihave.h"
+#include "bacnet/iam.h"
 #include "bacnet/npdu.h"
 #include "bacnet/whohas.h"
 #include "bacnet/basic/binding/address.h"
@@ -31,6 +32,7 @@ static gateway_bacnet_config_t config;
 static gateway_bacnet_stats_t stats;
 static char device_name[96], firmware_version[MAX_DEV_VER_LEN + 1], location[MAX_DEV_LOC_LEN + 1];
 static uint64_t now_ms, started_ms, last_timer_ms, last_second_ms, next_announce_ms;
+static uint64_t next_instance_check;
 static uint8_t receive_buffer[MAX_PDU], transmit_buffer[MAX_PDU];
 typedef struct { bool used; BACNET_OBJECT_TYPE type; uint32_t instance; uint64_t due; } recovery_t;
 static recovery_t recovery[RECOVERY_CAPACITY];
@@ -104,6 +106,21 @@ static object_functions_t object_table[] = {
      .Object_Writable_Property_List=no_writable_properties},
     {.Object_Type=MAX_BACNET_OBJECT_TYPE}
 };
+
+static void observe_i_am(uint8_t *data,uint16_t length,BACNET_ADDRESS *source)
+{
+    uint32_t instance;unsigned max_apdu;int segmentation;uint16_t vendor;
+    if(!source||source->mac_len!=6||
+       bacnet_iam_request_decode(data,length,&instance,&max_apdu,&segmentation,&vendor)!=(int)length||
+       instance!=config.device_instance)return;
+    uint32_t peer;memcpy(&peer,source->mac,4);
+    uint16_t port=((uint16_t)source->mac[4]<<8)|source->mac[5];
+    if(source->net==0&&peer==config.local_ip&&port==config.udp_port)return;
+    if(stats.instance_conflicts<UINT32_MAX)++stats.instance_conflicts;
+    stats.conflict_ip=peer;stats.conflict_port=port;stats.conflict_network=source->net;
+    stats.last_conflict_ms=now_ms;
+    iq_event("bacnet","duplicate_instance",1,"Another BACnet address advertised this Device instance; identity remains fixed");
+}
 
 static void who_is(uint8_t *data, uint16_t length, BACNET_ADDRESS *source)
 {
@@ -273,6 +290,7 @@ bool gateway_bacnet_init(const gateway_bacnet_config_t *input, uint64_t timestam
     apdu_set_unrecognized_service_handler_handler(handler_unrecognized_service);
     apdu_set_unconfirmed_handler(SERVICE_UNCONFIRMED_WHO_IS, who_is);
     apdu_set_unconfirmed_handler(SERVICE_UNCONFIRMED_WHO_HAS, who_has);
+    apdu_set_unconfirmed_handler(SERVICE_UNCONFIRMED_I_AM, observe_i_am);
     apdu_set_confirmed_handler(SERVICE_CONFIRMED_READ_PROPERTY, handler_read_property);
     apdu_set_confirmed_handler(SERVICE_CONFIRMED_READ_PROP_MULTIPLE, handler_read_property_multiple);
     apdu_set_confirmed_handler(SERVICE_CONFIRMED_WRITE_PROPERTY, handler_write_property);
@@ -283,6 +301,7 @@ bool gateway_bacnet_init(const gateway_bacnet_config_t *input, uint64_t timestam
     if (!bip_init(NULL)) { gateway_bacnet_shutdown(); return false; }
     Device_Set_Database_Revision(input->database_revision ? input->database_revision : 1);
     stats.initialized = true;
+    next_instance_check=now_ms;
     announce();
     return true;
 }
@@ -325,6 +344,12 @@ void gateway_bacnet_tick(uint64_t timestamp)
     delta = (now_ms - last_second_ms) / 1000;
     if (delta) { handler_cov_timer_seconds(delta > UINT32_MAX ? UINT32_MAX : (uint32_t)delta); last_second_ms += delta * 1000; }
     if (stats.link_up) {
+        if(now_ms>=next_instance_check) {
+            Send_WhoIs_Local(config.device_instance,config.device_instance);
+            if(stats.instance_checks<UINT32_MAX)++stats.instance_checks;
+            next_instance_check=now_ms+60000;
+        }
+        if(stats.instance_checks&&now_ms-started_ms>=3000)stats.instance_check_complete=true;
         /* One full bounded pass through at most 256 subscriptions; no wait for ACK. */
         for (unsigned step = 0; step < 4u * MAX_COV_SUBSCRIPTIONS + 8u; ++step) {
             if (handler_cov_fsm()) { break; }
