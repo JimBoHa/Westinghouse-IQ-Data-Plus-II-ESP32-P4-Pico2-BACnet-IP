@@ -6,6 +6,11 @@ See [validation status](VALIDATION.md) for the tests actually completed and the 
 
 ## Build
 
+[Firmware CI and release packaging](docs/RELEASES.md) build both processors and
+the recovery application from pinned tools. Candidates include compatibility,
+source provenance, and checksums; locally signed releases also authenticate the
+manifest and each OTA image. Private signing keys never enter CI.
+
 Initialize pinned submodules, install ESP-IDF 5.5.5, and source its `export.sh`. From the repository root:
 
 ```sh

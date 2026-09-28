@@ -92,6 +92,43 @@ A second fault/load run also successfully uploaded and reboot-verified Pico
 firmware through Ethernet during retry backoff. BACnet remained available and
 the test restored polling to disabled afterward. Both runs used PoE only.
 
+## Ethernet feature rollout (September 27, 2026)
+
+The separate feature PRs contain per-change validation. Native coverage now
+comprises 13 CTest targets, including startup acceptance, authenticated client,
+diagnostic ring, duplicate identity, restart codec/integration, soak review,
+and release integrity tests. All pass locally; the Linux CI native job also
+passes. Full/recovery ESP-IDF and pinned plain-Pico-2 builds pass locally.
+
+On the PoE-only development gateway with meter signals disconnected:
+
+- A deliberately unhealthy pending P4 image hit the startup deadline and
+  rolled back to the exact prior ELF/slot; positive sustained-health acceptance
+  also passed. This was a software-reset test, not a physical power cut.
+- Per-device HTTPS identity, authenticated certificate pinning, signed P4/Pico
+  updates, nonce replay/expiry/path/body binding, wrong keys, unsigned or
+  wrong-target images, wrong P4 project/Pico family, and protected configuration
+  rejection passed. Certificate/configuration persisted across updates.
+- Real NTP synchronization and bounded diagnostic-ring overwrite passed.
+  An independently encoded unicast duplicate Device claim produced the
+  expected warning without renumbering, reconfiguration, or reboot.
+- An independent BACnet client received one restart notification and matched
+  its three properties to Device reads. Default local-broadcast recipients
+  remained read-only. The observed boot timestamp came from actual NTP.
+- Chrome rendered desktop/mobile dashboards and tested all 198 point rows,
+  invalid-value hiding, key rejection/no persistent storage, reviewed settings
+  save/reboot, diagnostics download, both signed firmware update paths, safe
+  reboot, and key removal on lock/reload. Exact P4 ELF/slot/health and Pico
+  runtime return were verified. The test trusted only the pin-verified TLS key.
+- A 60-second real health monitor run completed 13 samples with a minimum
+  219,527 bytes of internal free heap and no failures. A wrong-port run retained
+  HTTPS evidence while independently failing BACnet. Offline review correctly
+  rejected the short successful run as 24-hour evidence.
+
+Polling was restored/left disabled. Site identities, captures, tokens, signed
+backups, and detailed reports remain private. Final CI artifact deployment and
+regression outcomes are recorded in PR #8 and the private hardware handoff.
+
 ## Remaining qualification
 
 - **Meter absent:** no physical electrical/logic-analyzer qualification, real
@@ -109,8 +146,8 @@ the test restored polling to disabled afterward. Both runs used PoE only.
 - Pico has no A/B image rollback. An application unable to expose its USB reset
   interface may require physical BOOTSEL recovery.
 - Health counters/rolling histories reset with the P4 session; COV leases are
-  RAM-only and clients must resubscribe. BI2 remains inactive. HTTP management
-  uses a bearer token on a trusted LAN without TLS. No BBMD/foreign-device
+  RAM-only and clients must resubscribe. BI2 remains inactive. HTTPS management
+  uses a pinned device certificate, one-use HMAC requests and signed firmware. No BBMD/foreign-device
   service or database/history download is provided.
 
 Local build reports, captures, firmware artifacts and their checksums are kept

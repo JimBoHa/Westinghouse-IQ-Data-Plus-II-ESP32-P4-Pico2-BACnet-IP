@@ -13,9 +13,19 @@ if(CONFIG_SECURE_BOOT OR CONFIG_SECURE_FLASH_ENC_ENABLED OR
    CONFIG_SECURE_ENABLE_SECURE_ROM_DL_MODE)
     message(FATAL_ERROR "This development port must not provision hardware security/eFuses")
 endif()
-execute_process(COMMAND git describe --always --dirty --abbrev=12
+execute_process(COMMAND git rev-parse --short=12 HEAD
     WORKING_DIRECTORY "${CMAKE_CURRENT_LIST_DIR}" OUTPUT_VARIABLE revision
-    OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+    OUTPUT_STRIP_TRAILING_WHITESPACE RESULT_VARIABLE revision_error)
+if(revision_error OR NOT revision MATCHES "^[0-9a-f]+$")
+    message(FATAL_ERROR "Cannot identify firmware source revision; check Git ownership and checkout")
+endif()
+execute_process(COMMAND git diff-index --quiet HEAD --
+    WORKING_DIRECTORY "${CMAKE_CURRENT_LIST_DIR}" RESULT_VARIABLE dirty)
+if(dirty GREATER 1)
+    message(FATAL_ERROR "Cannot inspect firmware source changes")
+elseif(dirty)
+    string(APPEND revision "-dirty")
+endif()
 target_compile_definitions(${COMPONENT_LIB} PRIVATE IQ_SOURCE_REVISION="${revision}")
 if(IQ_RECOVERY_BUILD)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE IQ_RECOVERY_BUILD=1)

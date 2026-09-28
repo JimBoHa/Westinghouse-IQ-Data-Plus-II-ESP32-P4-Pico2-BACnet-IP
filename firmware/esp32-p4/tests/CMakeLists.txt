@@ -15,6 +15,7 @@ add_library(iqcore STATIC ${PORT}/main/iq_points.c ${PORT}/main/iq_decode.c
     ${PORT}/main/iq_diagnostics.c ${PORT}/main/iq_model.c ${PORT}/main/iq_transport.c ${PORT}/main/iq_config.c ${PORT}/main/iq_uf2.c
     ${PORT}/third_party/cJSON/cJSON.c)
 target_include_directories(iqcore PUBLIC ${PORT}/main ${PORT}/third_party/cJSON)
+target_link_libraries(iqcore PUBLIC m)
 target_compile_options(iqcore PRIVATE -Wall -Wextra -Werror)
 set_source_files_properties(${PORT}/third_party/cJSON/cJSON.c
     PROPERTIES COMPILE_OPTIONS "-Wno-deprecated-declarations")
@@ -56,3 +57,4 @@ add_executable(test_restart_integration test_restart_integration.c)
 target_link_libraries(test_restart_integration PRIVATE iqbacnet)
 add_test(NAME restart_integration COMMAND test_restart_integration)
 add_test(NAME soak_monitor COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/test_soak.py -v)
+add_test(NAME release_package COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/test_release.py -v)

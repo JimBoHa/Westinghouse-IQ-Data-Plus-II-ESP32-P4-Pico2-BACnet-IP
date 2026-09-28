@@ -42,6 +42,7 @@ cJSON *iq_status_json(void)
     cJSON *j=cJSON_CreateObject();const esp_app_desc_t *app=esp_app_get_description();
     cJSON_AddStringToObject(j,"project",app->project_name);cJSON_AddStringToObject(j,"version",app->version);
     cJSON_AddStringToObject(j,"boot_id",iq_boot_id());
+    cJSON_AddStringToObject(j,"source_revision",IQ_SOURCE_REVISION);
     cJSON_AddBoolToObject(j,"recovery",true);cJSON_AddStringToObject(j,"ethernet_mac",mac_text);
     cJSON_AddStringToObject(j,"hostname",hostname);cJSON_AddNumberToObject(j,"reset_reason",esp_reset_reason());
     cJSON_AddNumberToObject(j,"uptime_seconds",esp_timer_get_time()/1000000.0);
