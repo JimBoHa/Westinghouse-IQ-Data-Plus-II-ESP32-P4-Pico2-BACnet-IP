@@ -1,6 +1,7 @@
 #include "iq_management.h"
 #include "iq_health.h"
 #include "iq_security.h"
+#include "iq_diagnostics.h"
 #include "iq_pico_update.h"
 #include "iq_uf2.h"
 #include <stdatomic.h>
@@ -35,7 +36,9 @@ static bool authorized(httpd_req_t *r)
         httpd_resp_set_status(r,"409 Conflict");
         httpd_resp_sendstr(r,"Startup health validation pending");return false;
     }
-    return iq_security_authorize(r);
+    bool ok=iq_security_authorize(r);
+    if(!ok)iq_event("management","auth_rejected",401,"Request authentication rejected");
+    return ok;
 }
 static esp_err_t challenge_handler(httpd_req_t *r) { return json_reply(r,iq_security_challenge()); }
 static esp_err_t pair_handler(httpd_req_t *r)
@@ -52,6 +55,12 @@ static esp_err_t auth_check_handler(httpd_req_t *r)
     if(!authorized(r))return ESP_OK;
     if(r->content_len||!iq_security_body(r,"",0))return httpd_resp_send_err(r,HTTPD_400_BAD_REQUEST,"Expected empty authenticated body");
     cJSON *j=cJSON_CreateObject();cJSON_AddBoolToObject(j,"authenticated",true);return json_reply(r,j);
+}
+static esp_err_t diagnostics_handler(httpd_req_t *r)
+{
+    if(!authorized(r))return ESP_OK;
+    if(r->content_len||!iq_security_body(r,"",0))return httpd_resp_send_err(r,HTTPD_400_BAD_REQUEST,"Expected empty authenticated body");
+    return json_reply(r,iq_diagnostics_json());
 }
 static esp_err_t redirect_handler(httpd_req_t *r)
 {
@@ -90,6 +99,7 @@ static esp_err_t config_handler(httpd_req_t *r)
     if(strlen(text)!=used||!iq_save_config(text,error,sizeof(error)))
         return httpd_resp_send_err(r,HTTPD_400_BAD_REQUEST,strlen(text)!=used?"Embedded NUL":error);
     httpd_resp_set_type(r,"application/json");httpd_resp_sendstr(r,"{\"saved\":true,\"restarting\":true}");
+    iq_event("management","configuration_saved",0,"Configuration saved; restart requested");
     iq_request_restart();return ESP_OK;
 }
 static bool hex_digest(const char *text,unsigned char out[32])
@@ -112,6 +122,7 @@ static esp_err_t ota_handler(httpd_req_t *r)
 {
     if(!authorized(r))return ESP_OK;
     if(!iq_security_image(r,"esp32p4"))return httpd_resp_send_err(r,HTTPD_400_BAD_REQUEST,"Valid ESP32-P4 release signature required");
+    iq_event("ota","upload_started",0,r->uri);
     bool expected=false;
     if(!atomic_compare_exchange_strong(&updating,&expected,true))
         return httpd_resp_send_err(r,HTTPD_400_BAD_REQUEST,"Update already in progress");
@@ -175,7 +186,7 @@ static esp_err_t ota_handler(httpd_req_t *r)
 done:
     if(begun)esp_ota_abort(handle);
     mbedtls_sha256_free(&hash);free(buffer);
-    if(!success) { atomic_store(&updating,false);return httpd_resp_send_err(r,HTTPD_400_BAD_REQUEST,error); }
+    if(!success) { iq_event("ota","p4_rejected",1,error);atomic_store(&updating,false);return httpd_resp_send_err(r,HTTPD_400_BAD_REQUEST,error); }
     httpd_resp_set_type(r,"application/json");httpd_resp_sendstr(r,"{\"verified\":true,\"restarting\":true}");
     iq_request_restart();return ESP_OK;
 }
@@ -184,6 +195,7 @@ static esp_err_t pico_handler(httpd_req_t *r)
 {
     if(!authorized(r))return ESP_OK;
     if(!iq_security_image(r,"pico2"))return httpd_resp_send_err(r,HTTPD_400_BAD_REQUEST,"Valid Pico 2 release signature required");
+    iq_event("ota","upload_started",0,r->uri);
     bool expected=false;
     if(!atomic_compare_exchange_strong(&updating,&expected,true))
         return httpd_resp_send_err(r,HTTPD_400_BAD_REQUEST,"Update already in progress");
@@ -211,7 +223,8 @@ static esp_err_t pico_handler(httpd_req_t *r)
     success=iq_pico_update(data,received,error,sizeof(error));
 done:
     free(data);atomic_store(&updating,false);
-    if(!success)return httpd_resp_send_err(r,HTTPD_400_BAD_REQUEST,error);
+    if(!success) { iq_event("ota","pico_failed",1,error);return httpd_resp_send_err(r,HTTPD_400_BAD_REQUEST,error); }
+    iq_event("ota","pico_verified",0,"Expected Pico 0.4.7 / pico2 returned");
     cJSON *j=cJSON_CreateObject();cJSON_AddBoolToObject(j,"pico_boot_verified",true);
     cJSON_AddStringToObject(j,"firmware","iqdata-pico-live");cJSON_AddStringToObject(j,"version","0.4.7");
     cJSON_AddStringToObject(j,"board","pico2");cJSON_AddStringToObject(j,"upload_sha256",digest);
@@ -233,6 +246,7 @@ void iq_web_start(void)
         {.uri="/api/points",.method=HTTP_GET,.handler=points_handler},
         {.uri="/api/auth/challenge",.method=HTTP_GET,.handler=challenge_handler},
         {.uri="/api/auth/check",.method=HTTP_POST,.handler=auth_check_handler},
+        {.uri="/api/diagnostics",.method=HTTP_POST,.handler=diagnostics_handler},
         {.uri="/api/pair",.method=HTTP_POST,.handler=pair_handler},
         {.uri="/api/config",.method=HTTP_POST,.handler=config_handler},
         {.uri="/api/firmware",.method=HTTP_POST,.handler=ota_handler},
