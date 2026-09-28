@@ -109,8 +109,8 @@ the test restored polling to disabled afterward. Both runs used PoE only.
 - Pico has no A/B image rollback. An application unable to expose its USB reset
   interface may require physical BOOTSEL recovery.
 - Health counters/rolling histories reset with the P4 session; COV leases are
-  RAM-only and clients must resubscribe. BI2 remains inactive. HTTP management
-  uses a bearer token on a trusted LAN without TLS. No BBMD/foreign-device
+  RAM-only and clients must resubscribe. BI2 remains inactive. HTTPS management
+  uses a pinned device certificate, one-use HMAC requests and signed firmware. No BBMD/foreign-device
   service or database/history download is provided.
 
 Local build reports, captures, firmware artifacts and their checksums are kept

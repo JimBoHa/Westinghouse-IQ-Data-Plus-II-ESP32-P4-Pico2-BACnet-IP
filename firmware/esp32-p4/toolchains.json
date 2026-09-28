@@ -1,0 +1,17 @@
+{
+  "esp_idf": {
+    "version": "5.5.5",
+    "commit": "b774170ff46c393eeb5e495ea37936038d3f4f4f",
+    "container": "espressif/idf:v5.5.5@sha256:a9231d0697ab8f7517cc072e93b7c83e04907bfbfba80b6440d7dbbf90665cf2"
+  },
+  "pico_sdk": {
+    "version": "2.3.1",
+    "commit": "079c6f39023649b154152db30f1d781e884879bc",
+    "picotool_commit": "2041936441b48a3cc53ae3da9e805229fe8f4e18"
+  },
+  "arm_gnu": {
+    "version": "15.2.Rel1",
+    "linux_x86_64_url": "https://developer.arm.com/-/media/Files/downloads/gnu/15.2.rel1/binrel/arm-gnu-toolchain-15.2.rel1-x86_64-arm-none-eabi.tar.xz",
+    "sha256": "597893282ac8c6ab1a4073977f2362990184599643b4c5ee34870a8215783a16"
+  }
+}
