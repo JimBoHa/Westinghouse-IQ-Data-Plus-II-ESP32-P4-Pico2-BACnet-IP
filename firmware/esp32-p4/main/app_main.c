@@ -1,5 +1,6 @@
 #include "iq_management.h"
 #include "iq_health.h"
+#include "iq_diagnostics.h"
 #include "iq_security.h"
 #include "iq_config.h"
 #include "iq_usb.h"
@@ -150,6 +151,7 @@ cJSON *iq_status_json(void)
     cJSON_AddNumberToObject(ota,"image_state",state);
     cJSON_AddBoolToObject(ota,"rollback_enabled",true);
     cJSON_AddItemToObject(ota,"startup_health",iq_health_json());
+    cJSON_AddItemToObject(j,"clock",iq_clock_json());
     cJSON_AddItemToObject(j,"security",iq_security_json());
     cJSON_AddBoolToObject(j,"restarting",atomic_load(&restarting));
     return j;
@@ -175,14 +177,15 @@ static void network_event(void *arg,esp_event_base_t base,int32_t id,void *data)
     (void)arg;
     xSemaphoreTake(state_lock,portMAX_DELAY);
     if(base==ETH_EVENT) {
-        if(id==ETHERNET_EVENT_CONNECTED) { link_up=true;ESP_LOGI("iq_eth","Link up"); }
+        if(id==ETHERNET_EVENT_CONNECTED) { link_up=true;iq_event("ethernet","link_up",0,"Ethernet link established");ESP_LOGI("iq_eth","Link up"); }
         else if(id==ETHERNET_EVENT_DISCONNECTED||id==ETHERNET_EVENT_STOP) {
-            link_up=false;ip_ready=false;memset(&network,0,sizeof(network));ESP_LOGW("iq_eth","Link down");
+            iq_event("ethernet","link_down",1,"Ethernet link lost");link_up=false;ip_ready=false;memset(&network,0,sizeof(network));ESP_LOGW("iq_eth","Link down");
         }
     } else if(base==IP_EVENT&&id==IP_EVENT_ETH_GOT_IP) {
         network=((ip_event_got_ip_t*)data)->ip_info;
         protected_ip=ntohl(network.ip.addr)==0xc0a84b97u;
         ip_ready=network.ip.addr&&!protected_ip;
+        if(ip_ready) { iq_clock_network_ready();iq_event("ethernet","ipv4_ready",0,"IPv4 address assigned"); }
         ESP_LOGI("iq_eth","Address " IPSTR " (%s.local)",IP2STR(&network.ip),hostname);
     } else if(base==IP_EVENT&&id==IP_EVENT_ETH_LOST_IP)ip_ready=false;
     bool stop=protected_ip;xSemaphoreGive(state_lock);
@@ -190,7 +193,7 @@ static void network_event(void *arg,esp_event_base_t base,int32_t id,void *data)
 }
 static void ethernet_start(void)
 {
-    ESP_ERROR_CHECK(esp_netif_init());ESP_ERROR_CHECK(esp_event_loop_create_default());
+    ESP_ERROR_CHECK(esp_netif_init());ESP_ERROR_CHECK(esp_event_loop_create_default());iq_clock_init();
     esp_netif_config_t cfg=ESP_NETIF_DEFAULT_ETH();netif=esp_netif_new(&cfg);configASSERT(netif);
     ESP_ERROR_CHECK(esp_netif_set_hostname(netif,hostname));
     eth_mac_config_t mc=ETH_MAC_DEFAULT_CONFIG();eth_phy_config_t pc=ETH_PHY_DEFAULT_CONFIG();
@@ -289,7 +292,7 @@ static bool startup_healthy(void)
 }
 void app_main(void)
 {
-    iq_health_begin();
+    iq_health_begin();iq_diagnostics_init();
     esp_chip_info_t chip;esp_chip_info(&chip);
     ESP_LOGI("iq_main","IQData %s source %s; ESP32-P4 revision %u",esp_app_get_description()->version,IQ_SOURCE_REVISION,chip.revision);
     configASSERT(chip.model==CHIP_ESP32P4&&chip.revision>=100&&chip.revision<300);
