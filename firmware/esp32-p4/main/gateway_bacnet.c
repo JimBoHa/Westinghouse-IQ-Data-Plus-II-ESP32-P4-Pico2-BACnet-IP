@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: 0BSD
  * Adapted from JimBoHa ESP32-P4 Modbus gateway 0729b7b; see ATTRIBUTION.md. */
 #include "gateway_bacnet.h"
+#include "iq_diagnostics.h"
 #include "bip_port.h"
 #include <float.h>
 #include <math.h>
@@ -154,7 +155,7 @@ static void cov_timeout(uint8_t invoke)
     bacapp_property_value_list_init(values, 2);
     cov.listOfValues = values;
     if (cov_notify_decode_service_request(failed_pdu + offset + 4, length - offset - 4, &cov) != length - offset - 4) { return; }
-    stats.cov_timeouts++;
+    stats.cov_timeouts++;iq_event("bacnet","cov_timeout",1,"Confirmed COV acknowledgement deadline exceeded; refresh scheduled");
     for (unsigned i = 0; i < RECOVERY_CAPACITY; ++i) {
         if (recovery[i].used && recovery[i].type == cov.monitoredObjectIdentifier.type &&
             recovery[i].instance == cov.monitoredObjectIdentifier.instance) { return; }

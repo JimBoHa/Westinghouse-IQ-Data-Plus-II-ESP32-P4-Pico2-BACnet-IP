@@ -1,6 +1,7 @@
 /* Optional small Ethernet recovery image. No meter requests or USB resets. */
 #include "iq_management.h"
 #include "iq_health.h"
+#include "iq_diagnostics.h"
 #include "iq_security.h"
 #include "iq_config.h"
 #include <stdio.h>
@@ -45,7 +46,7 @@ cJSON *iq_status_json(void)
     cJSON_AddNumberToObject(j,"uptime_seconds",esp_timer_get_time()/1000000.0);
     cJSON_AddNumberToObject(j,"free_heap",esp_get_free_heap_size());
     cJSON_AddItemToObject(j,"config",iq_config_json(&settings));
-    cJSON_AddItemToObject(j,"security",iq_security_json());
+    cJSON_AddItemToObject(j,"security",iq_security_json());cJSON_AddItemToObject(j,"clock",iq_clock_json());
     char hash[65];for(unsigned i=0;i<32;++i)snprintf(hash+2*i,3,"%02x",app->app_elf_sha256[i]);
     cJSON_AddStringToObject(j,"elf_sha256",hash);
     esp_netif_ip_info_t ip={0};(void)esp_netif_get_ip_info(netif,&ip);char address[16];
@@ -61,12 +62,13 @@ static void got_ip(void *arg,esp_event_base_t base,int32_t id,void *data)
 {
     (void)arg;(void)base;(void)id;
     const ip_event_got_ip_t *event=data;
+    if(ntohl(event->ip_info.ip.addr)!=0xc0a84b97u)iq_clock_network_ready();
     if(ntohl(event->ip_info.ip.addr)==0xc0a84b97u)
         esp_netif_action_stop(netif,ETH_EVENT,ETHERNET_EVENT_STOP,NULL);
 }
 void app_main(void)
 {
-    iq_health_begin();
+    iq_health_begin();iq_diagnostics_init();
     ESP_ERROR_CHECK(nvs_flash_init_partition("iqconfig"));nvs_handle_t store;
     ESP_ERROR_CHECK(nvs_open_from_partition("iqconfig","iqdata",NVS_READONLY,&store));
     size_t n=sizeof(token);ESP_ERROR_CHECK(nvs_get_str(store,"update_token",token,&n));
@@ -76,7 +78,7 @@ void app_main(void)
     nvs_close(store);
     uint8_t mac_bytes[6];ESP_ERROR_CHECK(esp_read_mac(mac_bytes,ESP_MAC_BASE));
     snprintf(hostname,sizeof(hostname),"iqdata-%02x%02x%02x",mac_bytes[3],mac_bytes[4],mac_bytes[5]);
-    ESP_ERROR_CHECK(esp_netif_init());ESP_ERROR_CHECK(esp_event_loop_create_default());
+    ESP_ERROR_CHECK(esp_netif_init());ESP_ERROR_CHECK(esp_event_loop_create_default());iq_clock_init();
     esp_netif_config_t cfg=ESP_NETIF_DEFAULT_ETH();netif=esp_netif_new(&cfg);configASSERT(netif);
     ESP_ERROR_CHECK(esp_netif_set_hostname(netif,hostname));
     eth_mac_config_t mc=ETH_MAC_DEFAULT_CONFIG();eth_phy_config_t pc=ETH_PHY_DEFAULT_CONFIG();

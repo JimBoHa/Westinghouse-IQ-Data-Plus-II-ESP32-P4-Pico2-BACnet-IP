@@ -1,4 +1,5 @@
 #include "iq_usb.h"
+#include "iq_diagnostics.h"
 #include "iq_transport.h"
 #include "iq_pico_update.h"
 #include <stdatomic.h>
@@ -35,6 +36,7 @@ static void failure(const char *text)
     xSemaphoreTake(status_lock,portMAX_DELAY);
     snprintf(status.last_error,sizeof(status.last_error),"%s",text);++status.failures;
     xSemaphoreGive(status_lock);
+    iq_event("usb","failure",1,text);
     ESP_LOGW("iq_usb","%s",text);
 }
 void iq_usb_status(iq_usb_status_t *out)
@@ -44,6 +46,7 @@ void iq_usb_status(iq_usb_status_t *out)
 void iq_usb_stop(void) { atomic_store(&stopping,true); }
 bool iq_usb_maintenance_begin(char *error,size_t size)
 {
+    iq_event("usb","maintenance",0,"Releasing meter transaction for firmware maintenance");
     atomic_store(&maintenance_requested,true);
     uint64_t until=now_ms()+12000;
     while(now_ms()<until) {
@@ -111,7 +114,7 @@ static bool identify(cdc_acm_dev_hdl_t device)
             snprintf(status.version,sizeof(status.version),"%s",version);status.qualified=true;
             if(!status.failures)status.last_error[0]=0;
             xSemaphoreGive(status_lock);
-            ESP_LOGI("iq_usb","Qualified %s",version);return true;
+            iq_event("usb","qualified",0,version);ESP_LOGI("iq_usb","Qualified %s",version);return true;
         }
         if(ch<32||ch>126||used+1>=sizeof(line)) { failure("Invalid Pico info response");return false; }
         line[used++]=(char)ch;

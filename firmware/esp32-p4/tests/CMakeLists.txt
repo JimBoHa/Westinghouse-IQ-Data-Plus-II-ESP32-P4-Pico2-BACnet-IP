@@ -12,7 +12,7 @@ target_include_directories(test_health PRIVATE ../main)
 add_test(NAME startup_health COMMAND test_health)
 set(PORT "${CMAKE_CURRENT_LIST_DIR}/..")
 add_library(iqcore STATIC ${PORT}/main/iq_points.c ${PORT}/main/iq_decode.c
-    ${PORT}/main/iq_model.c ${PORT}/main/iq_transport.c ${PORT}/main/iq_config.c ${PORT}/main/iq_uf2.c
+    ${PORT}/main/iq_diagnostics.c ${PORT}/main/iq_model.c ${PORT}/main/iq_transport.c ${PORT}/main/iq_config.c ${PORT}/main/iq_uf2.c
     ${PORT}/third_party/cJSON/cJSON.c)
 target_include_directories(iqcore PUBLIC ${PORT}/main ${PORT}/third_party/cJSON)
 target_compile_options(iqcore PRIVATE -Wall -Wextra -Werror)
@@ -42,3 +42,7 @@ add_test(NAME port_parity COMMAND ${Python3_EXECUTABLE}
     ${CMAKE_CURRENT_LIST_DIR}/test_port.py $<TARGET_FILE:iq_oracle> -v)
 
 add_test(NAME secure_client COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/test_secure_client.py -v)
+
+add_executable(test_diagnostics test_diagnostics.c)
+target_link_libraries(test_diagnostics PRIVATE iqcore)
+add_test(NAME diagnostic_ring COMMAND test_diagnostics)

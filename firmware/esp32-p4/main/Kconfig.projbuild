@@ -1,0 +1,9 @@
+menu "IQData gateway"
+    config IQ_NTP_SERVER
+        string "NTP server (empty disables synchronization)"
+        default "time.cloudflare.com"
+        help
+            Hostname or IPv4 address of the site's NTP server. Static networks
+            without DNS should use a numeric address. Events retain uptime and
+            null UTC until an actual synchronization. Measurements stay in RAM.
+endmenu
