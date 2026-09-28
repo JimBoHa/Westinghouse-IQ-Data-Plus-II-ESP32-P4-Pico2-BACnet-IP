@@ -1,4 +1,5 @@
 #include "iq_management.h"
+#include "iq_health.h"
 #include "iq_pico_update.h"
 #include "iq_uf2.h"
 #include <stdatomic.h>
@@ -16,6 +17,8 @@
 #include "mbedtls/sha256.h"
 
 static atomic_bool updating;
+static atomic_bool web_ready;
+bool iq_web_ready(void) { return atomic_load(&web_ready); }
 static esp_err_t json_reply(httpd_req_t *r,cJSON *j)
 {
     if(!j) return httpd_resp_send_err(r,HTTPD_500_INTERNAL_SERVER_ERROR,"Out of memory");
@@ -26,6 +29,10 @@ static esp_err_t json_reply(httpd_req_t *r,cJSON *j)
 }
 static bool authorized(httpd_req_t *r)
 {
+    if(!iq_health_accepted()) {
+        httpd_resp_set_status(r,"409 Conflict");
+        httpd_resp_sendstr(r,"Startup health validation pending");return false;
+    }
     char header[80];
     if(httpd_req_get_hdr_value_len(r,"Authorization")!=71||
        httpd_req_get_hdr_value_str(r,"Authorization",header,sizeof(header))!=ESP_OK||
@@ -208,4 +215,5 @@ void iq_web_start(void)
     };
     for(unsigned i=0;i<sizeof(handlers)/sizeof(handlers[0]);++i)
         ESP_ERROR_CHECK(httpd_register_uri_handler(server,&handlers[i]));
+    atomic_store(&web_ready,true);
 }

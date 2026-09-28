@@ -1,5 +1,6 @@
 /* Optional small Ethernet recovery image. No meter requests or USB resets. */
 #include "iq_management.h"
+#include "iq_health.h"
 #include "iq_config.h"
 #include <stdio.h>
 #include <string.h>
@@ -63,6 +64,7 @@ static void got_ip(void *arg,esp_event_base_t base,int32_t id,void *data)
 }
 void app_main(void)
 {
+    iq_health_begin();
     ESP_ERROR_CHECK(nvs_flash_init_partition("iqconfig"));nvs_handle_t store;
     ESP_ERROR_CHECK(nvs_open_from_partition("iqconfig","iqdata",NVS_READONLY,&store));
     size_t n=sizeof(token);ESP_ERROR_CHECK(nvs_get_str(store,"update_token",token,&n));
@@ -92,8 +94,5 @@ void app_main(void)
     }
     ESP_ERROR_CHECK(esp_eth_start(handle));ESP_ERROR_CHECK(mdns_init());ESP_ERROR_CHECK(mdns_hostname_set(hostname));
     ESP_ERROR_CHECK(mdns_service_add(NULL,"_http","_tcp",80,NULL,0));iq_web_start();
-    vTaskDelay(pdMS_TO_TICKS(10000));
-    esp_ota_img_states_t state;const esp_partition_t *running=esp_ota_get_running_partition();
-    if(esp_ota_get_state_partition(running,&state)==ESP_OK&&state==ESP_OTA_IMG_PENDING_VERIFY)
-        ESP_ERROR_CHECK(esp_ota_mark_app_valid_cancel_rollback());
+    iq_health_start(iq_web_ready);
 }
