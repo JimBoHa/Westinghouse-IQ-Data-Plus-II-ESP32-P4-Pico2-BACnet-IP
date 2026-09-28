@@ -5,6 +5,7 @@
 #include "iq_config.h"
 #include "iq_usb.h"
 #include "gateway_bacnet.h"
+#include "bacnet/bacenum.h"
 #include <math.h>
 #include <stdatomic.h>
 #include <stdio.h>
@@ -41,6 +42,16 @@ static gateway_bacnet_stats_t bacnet_stats;
 static uint64_t bacnet_heartbeat;
 static atomic_bool restarting;
 static uint64_t now_ms(void) { return esp_timer_get_time()/1000; }
+static uint8_t restart_reason(void)
+{
+    switch(esp_reset_reason()) {
+    case ESP_RST_POWERON: case ESP_RST_BROWNOUT: return RESTART_REASON_DETECTED_POWER_LOST;
+    case ESP_RST_TASK_WDT: case ESP_RST_INT_WDT: case ESP_RST_WDT: return RESTART_REASON_HARDWARE_WATCHDOG;
+    case ESP_RST_SW: return RESTART_REASON_WARMSTART;
+    case ESP_RST_PANIC: return RESTART_REASON_SOFTWARE_WATCHDOG;
+    default: return RESTART_REASON_COLDSTART;
+    }
+}
 
 static void print_json(cJSON *value)
 {
@@ -149,6 +160,15 @@ cJSON *iq_status_json(void)
         cJSON_AddNumberToObject(conflict,"port",bs.conflict_port);cJSON_AddNumberToObject(conflict,"network",bs.conflict_network);
         cJSON_AddNumberToObject(conflict,"uptime_ms",bs.last_conflict_ms);
     } else cJSON_AddNullToObject(bac,"last_conflict");
+    cJSON *restart=cJSON_AddObjectToObject(bac,"restart_notification");
+    cJSON_AddBoolToObject(restart,"timestamp_frozen",bs.restart_timestamp_frozen);
+    cJSON_AddStringToObject(restart,"timestamp_source",!bs.restart_timestamp_frozen?"pending":
+        (bs.restart_clock_valid?"ntp":"unsynchronized-1990-fallback"));
+    if(bs.restart_clock_valid)cJSON_AddNumberToObject(restart,"boot_utc_ms",bs.restart_boot_utc_ms);
+    else cJSON_AddNullToObject(restart,"boot_utc_ms");
+    cJSON_AddNumberToObject(restart,"sent",bs.restart_sent);
+    cJSON_AddNumberToObject(restart,"failures",bs.restart_failures);
+    cJSON_AddNumberToObject(restart,"exhausted",bs.restart_exhausted);
     cJSON *ota=cJSON_AddObjectToObject(j,"ota");
     const esp_partition_t *running=esp_ota_get_running_partition(),*next=esp_ota_get_next_update_partition(NULL);
     esp_ota_img_states_t state=ESP_OTA_IMG_UNDEFINED;
@@ -243,7 +263,7 @@ static void bacnet_task(void *arg)
             gateway_bacnet_config_t cfg={.device_instance=settings.device_instance,.device_name=settings.name,
                 .firmware_version=esp_app_get_description()->version,.udp_port=settings.bacnet_port,
                 .local_ip=ip.ip.addr,.netmask=ip.netmask.addr,.gateway=ip.gw.addr,.dhcp_enabled=settings.dhcp,
-                .vendor_id=0,.database_revision=1};
+                .vendor_id=0,.database_revision=1,.restart_reason=restart_reason()};
             initialized=gateway_bacnet_init(&cfg,now_ms());
             if(!initialized) { ESP_LOGE("iq_bacnet","BACnet initialization failed");vTaskDelay(pdMS_TO_TICKS(1000)); }
             else ESP_LOGI("iq_bacnet","Device %lu: 106 AI + 92 BI",(unsigned long)settings.device_instance);
@@ -256,6 +276,8 @@ static void bacnet_task(void *arg)
                 xSemaphoreTake(model_lock,portMAX_DELAY);iq_model_snapshot(model,now_ms(),values);xSemaphoreGive(model_lock);
                 gateway_bacnet_update(values);next=now_ms()+100;
             }
+            int64_t utc=0;(void)iq_clock_utc(&utc);
+            gateway_bacnet_runtime(now_ms(),utc,iq_health_accepted()&&iq_web_ready());
             gateway_bacnet_tick(now_ms());(void)gateway_bacnet_poll(0);
         }
         gateway_bacnet_stats_t stats;gateway_bacnet_stats(&stats);

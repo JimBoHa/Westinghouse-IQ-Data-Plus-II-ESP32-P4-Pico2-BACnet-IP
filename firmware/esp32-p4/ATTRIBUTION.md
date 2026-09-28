@@ -33,3 +33,11 @@ ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
 WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION
 OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN
 CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+
+## BACnet restart notification core
+
+`main/bacnet_restart.c`, its header, and the standalone codec tests are adapted
+from JimBoHa/ESP32-S3-PoE-ETH-8DI-8RO-C-BACnet-IP-Firmware commit
+`97c46a33dcc39ceee794c962dfbc0d94efd2788a`, under 0BSD (license text above).
+IQData integrates only the standard default local-broadcast recipient and keeps
+all BACnet writes disabled. UTC clock selection and task integration are local.
