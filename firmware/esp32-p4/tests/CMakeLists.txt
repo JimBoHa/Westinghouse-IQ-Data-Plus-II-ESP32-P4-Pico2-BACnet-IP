@@ -40,3 +40,5 @@ add_test(NAME rolling_windows COMMAND rolling_windows)
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 add_test(NAME port_parity COMMAND ${Python3_EXECUTABLE}
     ${CMAKE_CURRENT_LIST_DIR}/test_port.py $<TARGET_FILE:iq_oracle> -v)
+
+add_test(NAME secure_client COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/test_secure_client.py -v)

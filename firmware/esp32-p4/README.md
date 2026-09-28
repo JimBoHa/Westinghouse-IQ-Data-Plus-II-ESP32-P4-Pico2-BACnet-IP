@@ -46,10 +46,10 @@ At initial serial setup (115200 baud), `status` returns JSON; `token` returns th
 Use the host management tool with the **Ethernet MAC from status** and a private token file:
 
 ```sh
-python3 firmware/esp32-p4/tools/manage.py --host "$GATEWAY" status
-python3 firmware/esp32-p4/tools/manage.py --host "$GATEWAY" --expected-mac "$MAC" --token-file "$TOKEN_FILE" configure /private/path/gateway.json
-python3 firmware/esp32-p4/tools/manage.py --host "$GATEWAY" --expected-mac "$MAC" --token-file "$TOKEN_FILE" update build/esp32-p4/iqdata_p4_gateway.bin
-python3 firmware/esp32-p4/tools/manage.py --host "$GATEWAY" --expected-mac "$MAC" --token-file "$TOKEN_FILE" pico-update build/pico2/iqdata_pico_live.uf2
+python3 firmware/esp32-p4/tools/manage.py --host "$GATEWAY" --pin-file "$PIN_FILE" status
+python3 firmware/esp32-p4/tools/manage.py --host "$GATEWAY" --expected-mac "$MAC" --token-file "$TOKEN_FILE" --pin-file "$PIN_FILE" configure /private/path/gateway.json
+python3 firmware/esp32-p4/tools/manage.py --host "$GATEWAY" --expected-mac "$MAC" --token-file "$TOKEN_FILE" --pin-file "$PIN_FILE" update build/esp32-p4/iqdata_p4_gateway.bin
+python3 firmware/esp32-p4/tools/manage.py --host "$GATEWAY" --expected-mac "$MAC" --token-file "$TOKEN_FILE" --pin-file "$PIN_FILE" pico-update build/pico2/iqdata_pico_live.uf2
 ```
 
 Example configuration (select an unused identity and verify the meter address before enabling polling):
@@ -60,7 +60,7 @@ Example configuration (select an unused identity and verify the meter address be
 
 For four gateways, reserve distinct instances such as **75201–75204**, names `IQData-P4-01` through `IQData-P4-04`, and one DHCP reservation or validated static address per MAC. Check these identities are unused on the deployment network. For static networking supply `dhcp:false`, `ip`, `mask`, and `gateway`. The working gateway's **192.168.75.151 / 75151** is explicitly protected. No copied production address is a default.
 
-Management uses HTTP on a trusted local network with a per-device bearer token; it is not TLS. Restrict it to the management LAN. Uploads require the complete file's `X-SHA256`. The P4 updater checks target chip/project and image integrity before changing boot selection. The new image must pass five consecutive one-second local health checks after a ten-second grace period. An independent 60-second reset deadline returns a stalled pending image to bootloader rollback. Management writes are blocked until validation passes. Status exposes the acceptance state and sample count. Meter/Ethernet availability is not required for the local startup self-check.
+Management uses pinned HTTPS with one-use HMAC authentication. Pair the device and supply `--pin-file` to all client commands; see [security and signed updates](docs/SECURITY.md). Firmware uploads require an adjacent signed `.sig.json` manifest and the complete file's SHA-256. The P4 updater checks target chip/project and image integrity before changing boot selection. The new image must pass five consecutive one-second local health checks after a ten-second grace period. An independent 60-second reset deadline returns a stalled pending image to bootloader rollback. Management writes are blocked until validation passes. Status exposes the acceptance state and sample count. Meter/Ethernet availability is not required for the local startup self-check.
 
 Pico uploads are buffered in bounded RAM, hash checked, and restricted to contiguous plain-Pico-2 IQData 0.4.7 UF2 images. The P4 quiesces polling, aborts/drains output, uses the SDK reset interface to enter BOOTSEL, verifies RP2350 USB/volume identity, and copies the UF2 to the ROM volume. Pico remains powered. Success requires the expected firmware/board identity to reappear over CDC. The optional picotool absolute-family compatibility block is omitted; only RP2350 ARM application blocks are sent. This is not a Pico A/B rollback mechanism. An interrupted or nonbooting Pico application may require BOOTSEL recovery if it cannot expose its reset interface.
 
