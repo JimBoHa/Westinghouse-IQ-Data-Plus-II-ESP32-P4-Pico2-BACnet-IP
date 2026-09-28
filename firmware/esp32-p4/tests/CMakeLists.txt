@@ -46,3 +46,7 @@ add_test(NAME secure_client COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_LIST_D
 add_executable(test_diagnostics test_diagnostics.c)
 target_link_libraries(test_diagnostics PRIVATE iqcore)
 add_test(NAME diagnostic_ring COMMAND test_diagnostics)
+
+add_executable(test_identity test_identity.c)
+target_link_libraries(test_identity PRIVATE iqbacnet)
+add_test(NAME instance_conflicts COMMAND test_identity)

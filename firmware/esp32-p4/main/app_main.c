@@ -141,6 +141,14 @@ cJSON *iq_status_json(void)
     cJSON_AddNumberToObject(bac,"fault_points",bs.fault_points);cJSON_AddNumberToObject(bac,"received_packets",bs.received_packets);
     cJSON_AddNumberToObject(bac,"cov_pending",bs.cov_pending);cJSON_AddNumberToObject(bac,"cov_timeouts",bs.cov_timeouts);
     cJSON_AddNumberToObject(bac,"heartbeat_age_seconds",(now_ms()-heartbeat)/1000.0);
+    cJSON_AddStringToObject(bac,"instance_status",bs.instance_conflicts?"conflict":(bs.instance_check_complete?"checked":"checking"));
+    cJSON_AddNumberToObject(bac,"instance_checks",bs.instance_checks);cJSON_AddNumberToObject(bac,"instance_conflicts",bs.instance_conflicts);
+    if(bs.instance_conflicts) {
+        cJSON *conflict=cJSON_AddObjectToObject(bac,"last_conflict");esp_ip4_addr_t peer={.addr=bs.conflict_ip};
+        esp_ip4addr_ntoa(&peer,address,sizeof(address));cJSON_AddStringToObject(conflict,"ip",address);
+        cJSON_AddNumberToObject(conflict,"port",bs.conflict_port);cJSON_AddNumberToObject(conflict,"network",bs.conflict_network);
+        cJSON_AddNumberToObject(conflict,"uptime_ms",bs.last_conflict_ms);
+    } else cJSON_AddNullToObject(bac,"last_conflict");
     cJSON *ota=cJSON_AddObjectToObject(j,"ota");
     const esp_partition_t *running=esp_ota_get_running_partition(),*next=esp_ota_get_next_update_partition(NULL);
     esp_ota_img_states_t state=ESP_OTA_IMG_UNDEFINED;
