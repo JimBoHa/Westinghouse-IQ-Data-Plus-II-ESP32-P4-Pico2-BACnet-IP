@@ -96,6 +96,11 @@ The native tests use address/undefined-behavior sanitizers, compare C decoding a
 
 An accelerated 90,001-sample test spans more than 24 hours of synthetic time at 1.05-second cadence. It checks full-window warm-up, ring wrap, interpolation, counter decreases, transport gaps and recovery. This is not a physical 24-hour soak test.
 
+For real elapsed-time stability evidence, use the [read-only Ethernet soak
+monitor and offline reviewer](docs/SOAK_TEST.md). It records gateway health and
+independent directed BACnet discovery, never meter values. The default review
+requires a complete 24-hour log; a short monitor test does not qualify as one.
+
 The independent network client uses pinned `bacpypes3` from the original requirements. Specify a safe local interface and the commissioned development instance explicitly:
 
 ```sh
