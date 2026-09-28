@@ -13,3 +13,23 @@ Pinned dependencies retain their own licenses:
 - Pico SDK 2.3.1 and its TinyUSB dependency: Raspberry Pi SDK license notices.
 
 Board references: [Waveshare documentation](https://docs.waveshare.com/ESP32-P4-WIFI6-POE-ETH), [schematic](https://files.waveshare.com/wiki/ESP32-P4-WIFI6-POE-ETH/ESP32-P4-WIFI6-POE-ETH-Schematic.pdf), [Espressif USB host documentation](https://docs.espressif.com/projects/esp-idf/en/v5.5.4/esp32p4/api-reference/peripherals/usb_host.html), and [Raspberry Pi USB IDs](https://github.com/raspberrypi/usb-pid/blob/main/Readme.md).
+
+The reference gateway traces its BACnet integration to JimBoHa's
+`ESP32-S3-PoE-ETH-8DI-8RO-C-BACnet-IP-Firmware` at
+`97c46a33dcc39ceee794c962dfbc0d94efd2788a`. The retained MIT compatibility header
+uses the [included MIT permission text](third_party/bacnet-stack/license/MIT).
+BACnet Stack's other per-file licenses and linking exception are preserved in
+its `license/` directory.
+
+## 0BSD permission text for reused project code
+
+Permission to use, copy, modify, and/or distribute this software for any
+purpose with or without fee is hereby granted.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION
+OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN
+CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
