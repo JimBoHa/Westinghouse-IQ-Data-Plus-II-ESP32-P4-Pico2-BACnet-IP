@@ -9,6 +9,8 @@ import sys
 import time
 import urllib.error
 import urllib.request
+sys.path.insert(0,str(Path(__file__).resolve().parents[1]/"tools"))
+from gateway_client import Gateway
 
 
 def main():
@@ -16,6 +18,7 @@ def main():
     parser.add_argument("--target", required=True, type=ipaddress.IPv4Address)
     parser.add_argument("--expected-mac", required=True)
     parser.add_argument("--token-file", required=True, type=Path)
+    parser.add_argument("--pin-file", required=True, type=Path)
     parser.add_argument("--client-address", required=True)
     parser.add_argument("--pico-uf2", type=Path, help="Also test an Ethernet Pico update during meter-fault backoff")
     parser.add_argument("--meter-disconnected", action="store_true", required=True,
@@ -26,16 +29,11 @@ def main():
         parser.error("Only an identified private development gateway is allowed")
     if args.token_file.stat().st_mode & 0o077:
         parser.error("Token file must have mode 0600")
-    token = args.token_file.read_text().strip()
-    assert len(token) == 64 and all(c in "0123456789abcdef" for c in token)
-    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    client = Gateway(str(args.target), args.pin_file, args.token_file, args.expected_mac)
 
     def request(path, value=None):
         data = json.dumps(value).encode() if value is not None else None
-        headers = {"Authorization": "Bearer " + token, "Content-Type": "application/json"} if data else {}
-        req = urllib.request.Request(f"http://{args.target}{path}", data=data, headers=headers)
-        with opener.open(req, timeout=5) as response:
-            return json.load(response)
+        return client.request(path, data, authenticated=value is not None)
 
     def status():
         s = request("/api/status")
@@ -89,6 +87,7 @@ def main():
                     manager = Path(__file__).resolve().parents[1] / "tools/manage.py"
                     subprocess.run([sys.executable, str(manager), "--host", str(args.target),
                         "--expected-mac", args.expected_mac, "--token-file", str(args.token_file),
+                        "--pin-file", str(args.pin_file),
                         "pico-update", str(args.pico_uf2)], check=True, timeout=155)
                     report["pico_update_during_faults"] = True
                 time.sleep(2)
