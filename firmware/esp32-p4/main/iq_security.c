@@ -5,6 +5,7 @@
 #include <string.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
+#include "freertos/task.h"
 #include "esp_random.h"
 #include "esp_timer.h"
 #include "bootloader_random.h"
@@ -89,7 +90,7 @@ void iq_security_rotate(const char *token)
     xSemaphoreTake(lock,portMAX_DELAY);memcpy(admin_key,key,32);memset(challenges,0,sizeof(challenges));
     xSemaphoreGive(lock);memset(key,0,sizeof(key));
 }
-void iq_security_init(const char *token,const char *mac)
+static void security_initialize(const char *token,const char *mac)
 {
     lock=xSemaphoreCreateMutex();require(lock);iq_security_rotate(token);
     snprintf(device_mac,sizeof(device_mac),"%s",mac);
@@ -109,6 +110,18 @@ void iq_security_init(const char *token,const char *mac)
     hex(digest,32,certificate_hash);mbedtls_pk_free(&key);mbedtls_x509_crt_free(&cert);
     mbedtls_pk_init(&signer);
     require(mbedtls_pk_parse_public_key(&signer,(const unsigned char*)IQ_SIGNING_PUBLIC_KEY,sizeof(IQ_SIGNING_PUBLIC_KEY))==0);
+}
+typedef struct { const char *token,*mac; SemaphoreHandle_t done; } init_args_t;
+static void initialize_task(void *value)
+{
+    init_args_t *args=value;security_initialize(args->token,args->mac);
+    xSemaphoreGive(args->done);vTaskDelete(NULL);
+}
+void iq_security_init(const char *token,const char *mac)
+{
+    init_args_t args={.token=token,.mac=mac,.done=xSemaphoreCreateBinary()};require(args.done!=NULL);
+    require(xTaskCreate(initialize_task,"iq_tls_identity",16384,&args,5,NULL)==pdPASS);
+    xSemaphoreTake(args.done,portMAX_DELAY);vSemaphoreDelete(args.done);
 }
 const char *iq_security_certificate(void) { return identity.cert; }
 const char *iq_security_private_key(void) { return identity.key; }

@@ -242,7 +242,7 @@ void iq_web_start(void)
     };
     for(unsigned i=0;i<sizeof(handlers)/sizeof(handlers[0]);++i)
         ESP_ERROR_CHECK(httpd_register_uri_handler(server,&handlers[i]));
-    httpd_config_t plain=HTTPD_DEFAULT_CONFIG();plain.ctrl_port=32769;plain.max_open_sockets=1;
+    httpd_config_t plain=HTTPD_DEFAULT_CONFIG();plain.ctrl_port=32768;plain.max_open_sockets=1;
     plain.uri_match_fn=httpd_uri_match_wildcard;
     httpd_handle_t redirect;ESP_ERROR_CHECK(httpd_start(&redirect,&plain));
     const httpd_uri_t root={.uri="/*",.method=HTTP_GET,.handler=redirect_handler};
