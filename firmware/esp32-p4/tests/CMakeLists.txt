@@ -55,3 +55,4 @@ add_test(NAME restart_codec COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_LIST_D
 add_executable(test_restart_integration test_restart_integration.c)
 target_link_libraries(test_restart_integration PRIVATE iqbacnet)
 add_test(NAME restart_integration COMMAND test_restart_integration)
+add_test(NAME soak_monitor COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/test_soak.py -v)
