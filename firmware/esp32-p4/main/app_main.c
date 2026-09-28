@@ -1,4 +1,5 @@
 #include "iq_management.h"
+#include "iq_health.h"
 #include "iq_config.h"
 #include "iq_usb.h"
 #include "gateway_bacnet.h"
@@ -147,6 +148,7 @@ cJSON *iq_status_json(void)
     cJSON_AddNumberToObject(ota,"slot_bytes",next?next->size:0);
     cJSON_AddNumberToObject(ota,"image_state",state);
     cJSON_AddBoolToObject(ota,"rollback_enabled",true);
+    cJSON_AddItemToObject(ota,"startup_health",iq_health_json());
     cJSON_AddBoolToObject(j,"restarting",atomic_load(&restarting));
     return j;
 }
@@ -272,8 +274,20 @@ static void console_task(void *arg)
         else if(!overflow)line[used++]=(char)ch;
     }
 }
+static bool startup_healthy(void)
+{
+    iq_usb_status_t us;iq_usb_status(&us);
+    xSemaphoreTake(state_lock,portMAX_DELAY);
+    uint64_t heartbeat=bacnet_heartbeat;
+    bool network_ok=!(link_up&&ip_ready&&settings.commissioned)||bacnet_stats.initialized;
+    bool blocked=protected_ip;
+    xSemaphoreGive(state_lock);
+    return iq_web_ready()&&!blocked&&network_ok&&now_ms()-heartbeat<2000&&
+        now_ms()-us.heartbeat_ms<7000&&heap_caps_get_free_size(MALLOC_CAP_INTERNAL)>32768;
+}
 void app_main(void)
 {
+    iq_health_begin();
     esp_chip_info_t chip;esp_chip_info(&chip);
     ESP_LOGI("iq_main","IQData %s source %s; ESP32-P4 revision %u",esp_app_get_description()->version,IQ_SOURCE_REVISION,chip.revision);
     configASSERT(chip.model==CHIP_ESP32P4&&chip.revision>=100&&chip.revision<300);
@@ -302,12 +316,5 @@ void app_main(void)
     ESP_ERROR_CHECK(uart_driver_install(UART_NUM_0,2048,0,0,NULL,0));
     configASSERT(xTaskCreate(console_task,"iq_console",8192,NULL,3,NULL)==pdPASS);
     ESP_LOGI("iq_main","Ready: http://%s.local; meter polling %s; commissioning %s",hostname,settings.poll_enabled?"on":"off",settings.commissioned?"complete":"required");
-    /* Validate local service health without depending on absent Ethernet or meter. */
-    vTaskDelay(pdMS_TO_TICKS(10000));iq_usb_status_t us;iq_usb_status(&us);
-    xSemaphoreTake(state_lock,portMAX_DELAY);uint64_t heartbeat=bacnet_heartbeat;xSemaphoreGive(state_lock);
-    configASSERT(now_ms()-heartbeat<2000&&now_ms()-us.heartbeat_ms<7000&&heap_caps_get_free_size(MALLOC_CAP_INTERNAL)>32768);
-    esp_ota_img_states_t state;const esp_partition_t *running=esp_ota_get_running_partition();
-    if(esp_ota_get_state_partition(running,&state)==ESP_OK&&state==ESP_OTA_IMG_PENDING_VERIFY)
-        ESP_ERROR_CHECK(esp_ota_mark_app_valid_cancel_rollback());
-    ESP_LOGI("iq_main","Boot self-check passed; OTA image accepted");
+    iq_health_start(startup_healthy);
 }

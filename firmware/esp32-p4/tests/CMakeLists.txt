@@ -7,6 +7,9 @@ if(ENABLE_SANITIZERS AND CMAKE_C_COMPILER_ID MATCHES "Clang|GNU")
     add_link_options(-fsanitize=address,undefined)
 endif()
 enable_testing()
+add_executable(test_health test_health.c ../main/iq_health.c)
+target_include_directories(test_health PRIVATE ../main)
+add_test(NAME startup_health COMMAND test_health)
 set(PORT "${CMAKE_CURRENT_LIST_DIR}/..")
 add_library(iqcore STATIC ${PORT}/main/iq_points.c ${PORT}/main/iq_decode.c
     ${PORT}/main/iq_model.c ${PORT}/main/iq_transport.c ${PORT}/main/iq_config.c ${PORT}/main/iq_uf2.c
