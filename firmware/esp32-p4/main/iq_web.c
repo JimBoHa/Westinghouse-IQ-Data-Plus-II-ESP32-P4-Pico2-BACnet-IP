@@ -1,5 +1,6 @@
 #include "iq_management.h"
 #include "iq_health.h"
+#include "iq_security.h"
 #include "iq_pico_update.h"
 #include "iq_uf2.h"
 #include <stdatomic.h>
@@ -7,6 +8,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "esp_http_server.h"
+#include "esp_https_server.h"
 #include "esp_app_desc.h"
 #include "esp_ota_ops.h"
 #include "esp_image_format.h"
@@ -33,14 +35,30 @@ static bool authorized(httpd_req_t *r)
         httpd_resp_set_status(r,"409 Conflict");
         httpd_resp_sendstr(r,"Startup health validation pending");return false;
     }
-    char header[80];
-    if(httpd_req_get_hdr_value_len(r,"Authorization")!=71||
-       httpd_req_get_hdr_value_str(r,"Authorization",header,sizeof(header))!=ESP_OK||
-       strncmp(header,"Bearer ",7)||!iq_check_token(header+7)) {
-        httpd_resp_set_status(r,"401 Unauthorized");
-        httpd_resp_sendstr(r,"Device update token required");return false;
-    }
-    return true;
+    return iq_security_authorize(r);
+}
+static esp_err_t challenge_handler(httpd_req_t *r) { return json_reply(r,iq_security_challenge()); }
+static esp_err_t pair_handler(httpd_req_t *r)
+{
+    if(r->content_len!=64)return httpd_resp_send_err(r,HTTPD_400_BAD_REQUEST,"Expected 32-byte hex challenge");
+    char nonce[65];size_t received=0;
+    while(received<64) { int n=httpd_req_recv(r,nonce+received,64-received);if(n<=0)return ESP_FAIL;received+=n; }
+    nonce[64]=0;cJSON *reply=iq_security_pair(nonce);
+    if(!reply)return httpd_resp_send_err(r,HTTPD_400_BAD_REQUEST,"Invalid challenge");
+    return json_reply(r,reply);
+}
+static esp_err_t auth_check_handler(httpd_req_t *r)
+{
+    if(!authorized(r))return ESP_OK;
+    if(r->content_len||!iq_security_body(r,"",0))return httpd_resp_send_err(r,HTTPD_400_BAD_REQUEST,"Expected empty authenticated body");
+    cJSON *j=cJSON_CreateObject();cJSON_AddBoolToObject(j,"authenticated",true);return json_reply(r,j);
+}
+static esp_err_t redirect_handler(httpd_req_t *r)
+{
+    cJSON *status=iq_status_json();const cJSON *host=cJSON_GetObjectItemCaseSensitive(status,"hostname");
+    char location[96];snprintf(location,sizeof(location),"https://%s.local/",cJSON_IsString(host)?host->valuestring:"iqdata");
+    cJSON_Delete(status);httpd_resp_set_status(r,"308 Permanent Redirect");
+    httpd_resp_set_hdr(r,"Location",location);return httpd_resp_sendstr(r,"Use HTTPS management");
 }
 static esp_err_t status_handler(httpd_req_t *r) { return json_reply(r,iq_status_json()); }
 static esp_err_t points_handler(httpd_req_t *r) { return json_reply(r,iq_points_json()); }
@@ -68,6 +86,7 @@ static esp_err_t config_handler(httpd_req_t *r)
     }
     if(used!=r->content_len) return httpd_resp_send_err(r,HTTPD_400_BAD_REQUEST,"Configuration deadline exceeded");
     text[used]=0;
+    if(!iq_security_body(r,text,used))return httpd_resp_send_err(r,HTTPD_400_BAD_REQUEST,"Authenticated body hash mismatch");
     if(strlen(text)!=used||!iq_save_config(text,error,sizeof(error)))
         return httpd_resp_send_err(r,HTTPD_400_BAD_REQUEST,strlen(text)!=used?"Embedded NUL":error);
     httpd_resp_set_type(r,"application/json");httpd_resp_sendstr(r,"{\"saved\":true,\"restarting\":true}");
@@ -92,6 +111,7 @@ static bool hex_digest(const char *text,unsigned char out[32])
 static esp_err_t ota_handler(httpd_req_t *r)
 {
     if(!authorized(r))return ESP_OK;
+    if(!iq_security_image(r,"esp32p4"))return httpd_resp_send_err(r,HTTPD_400_BAD_REQUEST,"Valid ESP32-P4 release signature required");
     bool expected=false;
     if(!atomic_compare_exchange_strong(&updating,&expected,true))
         return httpd_resp_send_err(r,HTTPD_400_BAD_REQUEST,"Update already in progress");
@@ -163,6 +183,7 @@ done:
 static esp_err_t pico_handler(httpd_req_t *r)
 {
     if(!authorized(r))return ESP_OK;
+    if(!iq_security_image(r,"pico2"))return httpd_resp_send_err(r,HTTPD_400_BAD_REQUEST,"Valid Pico 2 release signature required");
     bool expected=false;
     if(!atomic_compare_exchange_strong(&updating,&expected,true))
         return httpd_resp_send_err(r,HTTPD_400_BAD_REQUEST,"Update already in progress");
@@ -199,14 +220,20 @@ done:
 #endif
 void iq_web_start(void)
 {
-    httpd_config_t config=HTTPD_DEFAULT_CONFIG();
-    config.stack_size=16384;config.recv_wait_timeout=5;config.send_wait_timeout=5;
-    config.lru_purge_enable=true;
-    httpd_handle_t server;ESP_ERROR_CHECK(httpd_start(&server,&config));
+    httpd_ssl_config_t config=HTTPD_SSL_CONFIG_DEFAULT();
+    config.httpd.stack_size=16384;config.httpd.recv_wait_timeout=5;config.httpd.send_wait_timeout=5;
+    config.httpd.max_uri_handlers=16;config.httpd.max_open_sockets=3;config.httpd.lru_purge_enable=true;
+    config.servercert=(const uint8_t*)iq_security_certificate();config.servercert_len=strlen(iq_security_certificate())+1;
+    config.prvtkey_pem=(const uint8_t*)iq_security_private_key();config.prvtkey_len=strlen(iq_security_private_key())+1;
+    config.tls_handshake_timeout_ms=5000;
+    httpd_handle_t server;ESP_ERROR_CHECK(httpd_ssl_start(&server,&config));
     const httpd_uri_t handlers[]={
         {.uri="/",.method=HTTP_GET,.handler=index_handler},
         {.uri="/api/status",.method=HTTP_GET,.handler=status_handler},
         {.uri="/api/points",.method=HTTP_GET,.handler=points_handler},
+        {.uri="/api/auth/challenge",.method=HTTP_GET,.handler=challenge_handler},
+        {.uri="/api/auth/check",.method=HTTP_POST,.handler=auth_check_handler},
+        {.uri="/api/pair",.method=HTTP_POST,.handler=pair_handler},
         {.uri="/api/config",.method=HTTP_POST,.handler=config_handler},
         {.uri="/api/firmware",.method=HTTP_POST,.handler=ota_handler},
 #ifndef IQ_RECOVERY_BUILD
@@ -215,5 +242,10 @@ void iq_web_start(void)
     };
     for(unsigned i=0;i<sizeof(handlers)/sizeof(handlers[0]);++i)
         ESP_ERROR_CHECK(httpd_register_uri_handler(server,&handlers[i]));
+    httpd_config_t plain=HTTPD_DEFAULT_CONFIG();plain.ctrl_port=32769;plain.max_open_sockets=1;
+    plain.uri_match_fn=httpd_uri_match_wildcard;
+    httpd_handle_t redirect;ESP_ERROR_CHECK(httpd_start(&redirect,&plain));
+    const httpd_uri_t root={.uri="/*",.method=HTTP_GET,.handler=redirect_handler};
+    ESP_ERROR_CHECK(httpd_register_uri_handler(redirect,&root));
     atomic_store(&web_ready,true);
 }

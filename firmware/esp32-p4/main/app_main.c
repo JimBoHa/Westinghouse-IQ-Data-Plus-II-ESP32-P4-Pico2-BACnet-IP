@@ -1,5 +1,6 @@
 #include "iq_management.h"
 #include "iq_health.h"
+#include "iq_security.h"
 #include "iq_config.h"
 #include "iq_usb.h"
 #include "gateway_bacnet.h"
@@ -61,7 +62,7 @@ static bool save_token(const char *token)
     xSemaphoreTake(config_lock,portMAX_DELAY);
     esp_err_t err=nvs_set_str(storage,"update_token",token);
     if(err==ESP_OK)err=nvs_commit(storage);
-    if(err==ESP_OK)memcpy(update_token,token,65);
+    if(err==ESP_OK) { memcpy(update_token,token,65);iq_security_rotate(token); }
     xSemaphoreGive(config_lock);
     return err==ESP_OK;
 }
@@ -149,6 +150,7 @@ cJSON *iq_status_json(void)
     cJSON_AddNumberToObject(ota,"image_state",state);
     cJSON_AddBoolToObject(ota,"rollback_enabled",true);
     cJSON_AddItemToObject(ota,"startup_health",iq_health_json());
+    cJSON_AddItemToObject(j,"security",iq_security_json());
     cJSON_AddBoolToObject(j,"restarting",atomic_load(&restarting));
     return j;
 }
@@ -311,10 +313,10 @@ void app_main(void)
     snprintf(hostname,sizeof(hostname),"iqdata-%02x%02x%02x",mac[3],mac[4],mac[5]);
     model=iq_model_create();configASSERT(model);
     iq_usb_start(model,model_lock,&settings);
-    ethernet_start();iq_web_start();
+    ethernet_start();iq_security_init(update_token,mac_text);iq_web_start();
     configASSERT(xTaskCreate(bacnet_task,"iq_bacnet",16384,NULL,4,NULL)==pdPASS);
     ESP_ERROR_CHECK(uart_driver_install(UART_NUM_0,2048,0,0,NULL,0));
     configASSERT(xTaskCreate(console_task,"iq_console",8192,NULL,3,NULL)==pdPASS);
-    ESP_LOGI("iq_main","Ready: http://%s.local; meter polling %s; commissioning %s",hostname,settings.poll_enabled?"on":"off",settings.commissioned?"complete":"required");
+    ESP_LOGI("iq_main","Ready: https://%s.local; meter polling %s; commissioning %s",hostname,settings.poll_enabled?"on":"off",settings.commissioned?"complete":"required");
     iq_health_start(startup_healthy);
 }
