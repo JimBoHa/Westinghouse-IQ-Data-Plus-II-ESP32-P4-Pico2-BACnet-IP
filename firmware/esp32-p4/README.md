@@ -39,6 +39,11 @@ Follow the original `docs/WIRING.md` and `docs/PROTOCOL.md`. Pico GP0=CLK, GP1=R
 
 ## Commissioning and Ethernet management
 
+The [browser dashboard](docs/DASHBOARD.md) provides live quality/age views,
+reviewed settings, diagnostic downloads, safe reboot, and signed updates for
+both processors. Verify the HTTPS certificate against the commissioned pin
+before loading the device's private key into the page.
+
 A new P4 starts with DHCP and hostname `iqdata-<last-three-base-MAC-bytes>.local`. It does not advertise BACnet until an identity is commissioned. Use DHCP leases or mDNS to find it. `/api/status` reports identity, network, firmware, free memory, Pico state and OTA slot. `/api/points` returns values together with validity; a retained numeric value with `valid:false` must not be treated as a reading.
 
 At initial serial setup (115200 baud), `status` returns JSON; `token` returns the device token; `key <64 lowercase hex characters>` replaces it. Store the token in a private mode-0600 file outside the repository. Avoid capturing token responses in shared logs. `config <JSON>` saves settings and restarts. `reboot` restarts the P4 after releasing the Pico transaction.
@@ -102,7 +107,7 @@ the following test temporarily enables bounded requests, checks BACnet under
 load, updates Pico during fault recovery, and restores the original configuration:
 
 ```sh
-python3 firmware/esp32-p4/tests/test_no_meter.py --target "$GATEWAY_IP" --expected-mac "$MAC" --token-file "$TOKEN_FILE" --client-address "$CLIENT_IP/24:47808" --meter-disconnected --pico-uf2 build/pico2/iqdata_pico_live.uf2 --output /private/path/no-meter-report.json
+python3 firmware/esp32-p4/tests/test_no_meter.py --target "$GATEWAY_IP" --expected-mac "$MAC" --token-file "$TOKEN_FILE" --pin-file "$PIN_FILE" --client-address "$CLIENT_IP/24:47808" --meter-disconnected --pico-uf2 build/pico2/iqdata_pico_live.uf2 --output /private/path/no-meter-report.json
 ```
 
 Meter qualification still requires safe wiring verification, bounded real reads, raw/decoded/display comparison, fault recovery with Pico powered, a continuous 15-minute physical run, and separate hour/day/long-soak evidence. Compilation and native fixtures do not establish those results.
