@@ -15,6 +15,7 @@ void iq_event_append(iq_event_ring_t *ring,uint64_t uptime,int64_t utc,const cha
 cJSON *iq_event_json(const iq_event_ring_t *ring);
 #ifdef ESP_PLATFORM
 void iq_diagnostics_init(void);
+const char *iq_boot_id(void);
 void iq_clock_init(void);
 void iq_clock_network_ready(void);
 bool iq_clock_utc(int64_t *utc_ms);

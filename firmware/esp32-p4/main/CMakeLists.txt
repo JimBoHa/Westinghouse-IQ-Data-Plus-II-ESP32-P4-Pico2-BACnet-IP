@@ -6,7 +6,8 @@ idf_component_register(SRCS ${app_source} "iq_points.c" "iq_decode.c" "iq_model.
     "iq_transport.c" "iq_usb.c" "iq_config.c" "iq_web.c" "iq_health.c" "iq_security.c" "iq_diagnostics.c" "iq_uf2.c" "iq_pico_update.c" "gateway_bacnet.c" "bacnet_restart.c" "bip_port.c"
     INCLUDE_DIRS "." PRIV_REQUIRES bacnet_stack esp_eth esp_netif esp_event esp_timer
     esp_http_server esp_https_server nvs_flash json lwip esp_app_format esp_driver_uart esp_driver_usb_serial_jtag
-    usb esp_hw_support esp_system app_update esp_partition mbedtls bootloader_support)
+    usb esp_hw_support esp_system app_update esp_partition mbedtls bootloader_support
+    EMBED_TXTFILES "web/index.html" "web/dashboard.css" "web/dashboard.js")
 if(CONFIG_SECURE_BOOT OR CONFIG_SECURE_FLASH_ENC_ENABLED OR
    CONFIG_BOOTLOADER_APP_ANTI_ROLLBACK OR CONFIG_SECURE_DISABLE_ROM_DL_MODE OR
    CONFIG_SECURE_ENABLE_SECURE_ROM_DL_MODE)
