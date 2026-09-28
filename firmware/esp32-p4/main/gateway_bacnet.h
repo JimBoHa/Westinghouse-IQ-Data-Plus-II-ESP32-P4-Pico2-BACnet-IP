@@ -33,6 +33,7 @@ typedef struct {
     const char *model_name; /* Optional, at most 32 bytes. */
     const char *description; /* Optional, at most 64 bytes. */
     uint32_t database_revision; /* 0 uses 1; increment for each changed map. */
+    uint8_t restart_reason;
 } gateway_bacnet_config_t;
 typedef struct {
     bool initialized, link_up;
@@ -42,6 +43,9 @@ typedef struct {
     uint16_t conflict_port, conflict_network;
     uint64_t last_conflict_ms;
     bool instance_check_complete;
+    bool restart_timestamp_frozen,restart_clock_valid;
+    uint32_t restart_sent,restart_failures,restart_exhausted;
+    int64_t restart_boot_utc_ms;
 } gateway_bacnet_stats_t;
 
 /* All functions belong to one BACnet task. Caller snapshots meter state
@@ -50,6 +54,8 @@ bool gateway_bacnet_init(const gateway_bacnet_config_t *config, uint64_t now_ms)
 /* values contains one entry per active catalog point, in catalog order. */
 void gateway_bacnet_update(const iq_value_t *values);
 void gateway_bacnet_tick(uint64_t now_ms);
+/* Call from the BACnet owner before tick. UTC zero means unsynchronized. */
+void gateway_bacnet_runtime(uint64_t uptime_ms,int64_t utc_ms,bool startup_ready);
 unsigned gateway_bacnet_poll(unsigned timeout_ms);
 bool gateway_bacnet_network_update(uint32_t ip, uint32_t mask, uint32_t gateway,
                                    bool link_up, uint64_t now_ms);
