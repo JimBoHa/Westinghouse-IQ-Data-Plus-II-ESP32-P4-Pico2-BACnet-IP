@@ -1,0 +1,211 @@
+#include "iq_management.h"
+#include "iq_pico_update.h"
+#include "iq_uf2.h"
+#include <stdatomic.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include "esp_http_server.h"
+#include "esp_app_desc.h"
+#include "esp_ota_ops.h"
+#include "esp_image_format.h"
+#include "esp_timer.h"
+#include "esp_heap_caps.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "mbedtls/sha256.h"
+
+static atomic_bool updating;
+static esp_err_t json_reply(httpd_req_t *r,cJSON *j)
+{
+    if(!j) return httpd_resp_send_err(r,HTTPD_500_INTERNAL_SERVER_ERROR,"Out of memory");
+    char *text=cJSON_PrintUnformatted(j);cJSON_Delete(j);
+    if(!text) return httpd_resp_send_err(r,HTTPD_500_INTERNAL_SERVER_ERROR,"Out of memory");
+    httpd_resp_set_type(r,"application/json");httpd_resp_set_hdr(r,"Cache-Control","no-store");
+    esp_err_t err=httpd_resp_send(r,text,HTTPD_RESP_USE_STRLEN);free(text);return err;
+}
+static bool authorized(httpd_req_t *r)
+{
+    char header[80];
+    if(httpd_req_get_hdr_value_len(r,"Authorization")!=71||
+       httpd_req_get_hdr_value_str(r,"Authorization",header,sizeof(header))!=ESP_OK||
+       strncmp(header,"Bearer ",7)||!iq_check_token(header+7)) {
+        httpd_resp_set_status(r,"401 Unauthorized");
+        httpd_resp_sendstr(r,"Device update token required");return false;
+    }
+    return true;
+}
+static esp_err_t status_handler(httpd_req_t *r) { return json_reply(r,iq_status_json()); }
+static esp_err_t points_handler(httpd_req_t *r) { return json_reply(r,iq_points_json()); }
+static esp_err_t index_handler(httpd_req_t *r)
+{
+    httpd_resp_set_type(r,"text/html; charset=utf-8");
+    return httpd_resp_sendstr(r,
+        "<!doctype html><html lang=en><meta charset=utf-8><meta name=viewport content='width=device-width'>"
+        "<title>IQ Data Plus II gateway</title><style>body{font:16px system-ui;max-width:960px;margin:3em auto;padding:0 1em}pre{white-space:pre-wrap;background:#f4f5f6;padding:1em}a{margin-right:1em}</style>"
+        "<h1>IQ Data Plus II gateway</h1><p>Read-only BACnet meter gateway. Check point quality before using readings.</p>"
+        "<p><a href=/api/status>Gateway status</a><a href=/api/points>Point values and quality</a></p>"
+        "<p>Commissioning and firmware updates require this gateway's private update token. Use the repository's Ethernet management tool.</p>"
+        "<pre id=s>Loading status...</pre><script>async function refresh(){try{let r=await fetch('/api/status',{cache:'no-store'});document.querySelector('#s').textContent=JSON.stringify(await r.json(),null,2)}catch(e){document.querySelector('#s').textContent='Gateway unavailable; retrying'}}refresh();setInterval(refresh,5000)</script></html>");
+}
+static esp_err_t config_handler(httpd_req_t *r)
+{
+    if(!authorized(r)) return ESP_OK;
+    if(atomic_load(&updating)) return httpd_resp_send_err(r,HTTPD_400_BAD_REQUEST,"Firmware update in progress");
+    if(r->content_len<2||r->content_len>1023) return httpd_resp_send_err(r,HTTPD_400_BAD_REQUEST,"Configuration length 2..1023 required");
+    char text[1024],error[192];size_t used=0;int64_t deadline=esp_timer_get_time()+10000000;
+    while(used<r->content_len&&esp_timer_get_time()<deadline) {
+        int n=httpd_req_recv(r,text+used,r->content_len-used);
+        if(n<=0) return httpd_resp_send_err(r,HTTPD_400_BAD_REQUEST,"Incomplete configuration");
+        used+=n;
+    }
+    if(used!=r->content_len) return httpd_resp_send_err(r,HTTPD_400_BAD_REQUEST,"Configuration deadline exceeded");
+    text[used]=0;
+    if(strlen(text)!=used||!iq_save_config(text,error,sizeof(error)))
+        return httpd_resp_send_err(r,HTTPD_400_BAD_REQUEST,strlen(text)!=used?"Embedded NUL":error);
+    httpd_resp_set_type(r,"application/json");httpd_resp_sendstr(r,"{\"saved\":true,\"restarting\":true}");
+    iq_request_restart();return ESP_OK;
+}
+static bool hex_digest(const char *text,unsigned char out[32])
+{
+    if(strlen(text)!=64)return false;
+    for(unsigned i=0;i<32;++i) {
+        unsigned value=0;
+        for(unsigned b=0;b<2;++b) {
+            char c=text[i*2+b];unsigned nibble;
+            if(c>='0'&&c<='9')nibble=c-'0';
+            else if(c>='a'&&c<='f')nibble=c-'a'+10;
+            else return false;
+            value=value*16+nibble;
+        }
+        out[i]=value;
+    }
+    return true;
+}
+static esp_err_t ota_handler(httpd_req_t *r)
+{
+    if(!authorized(r))return ESP_OK;
+    bool expected=false;
+    if(!atomic_compare_exchange_strong(&updating,&expected,true))
+        return httpd_resp_send_err(r,HTTPD_400_BAD_REQUEST,"Update already in progress");
+    char error[160]="Invalid update",digest_text[65];unsigned char expected_hash[32],actual_hash[32];
+    const esp_partition_t *next=esp_ota_get_next_update_partition(NULL);
+    esp_ota_handle_t handle=0;bool begun=false,success=false;
+    mbedtls_sha256_context hash;mbedtls_sha256_init(&hash);
+    uint8_t *buffer=heap_caps_malloc(4096,MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT);
+    if(!buffer) { snprintf(error,sizeof(error),"Out of memory");goto done; }
+    if(!next||r->content_len<512||r->content_len>next->size) {
+        snprintf(error,sizeof(error),"Image does not fit inactive OTA slot");goto done;
+    }
+    if(httpd_req_get_hdr_value_len(r,"X-SHA256")!=64||
+       httpd_req_get_hdr_value_str(r,"X-SHA256",digest_text,sizeof(digest_text))!=ESP_OK||
+       !hex_digest(digest_text,expected_hash)) {
+        snprintf(error,sizeof(error),"X-SHA256 must contain image SHA256");goto done;
+    }
+    size_t received=0,first=0;int64_t deadline=esp_timer_get_time()+120000000;
+    while(first<512&&esp_timer_get_time()<deadline) {
+        int n=httpd_req_recv(r,(char*)buffer+first,512-first);
+        if(n<=0) { snprintf(error,sizeof(error),"Truncated image header");goto done; }
+        first+=n;
+    }
+    if(first!=512) { snprintf(error,sizeof(error),"Image header deadline exceeded");goto done; }
+    esp_image_header_t header;esp_app_desc_t desc;
+    memcpy(&header,buffer,sizeof(header));
+    memcpy(&desc,buffer+sizeof(header)+sizeof(esp_image_segment_header_t),sizeof(desc));
+    if(first!=512||header.magic!=ESP_IMAGE_HEADER_MAGIC||header.chip_id!=ESP_CHIP_ID_ESP32P4||
+       desc.magic_word!=ESP_APP_DESC_MAGIC_WORD||
+       memcmp(desc.project_name,esp_app_get_description()->project_name,sizeof(desc.project_name))) {
+        snprintf(error,sizeof(error),"Image must be an IQData ESP32-P4 application");goto done;
+    }
+    esp_err_t err=esp_ota_begin(next,OTA_WITH_SEQUENTIAL_WRITES,&handle);
+    if(err!=ESP_OK) { snprintf(error,sizeof(error),"esp_ota_begin: %s",esp_err_to_name(err));goto done; }
+    begun=true;
+    if(mbedtls_sha256_starts(&hash,0)!=0)goto done;
+    for(;;) {
+        size_t count=first;first=0;
+        if(!count&&received<r->content_len) {
+            if(esp_timer_get_time()>=deadline) { snprintf(error,sizeof(error),"120-second upload deadline exceeded");goto done; }
+            size_t remaining=r->content_len-received;
+            int n=httpd_req_recv(r,(char*)buffer,remaining>4096?4096:remaining);
+            if(n<=0) { snprintf(error,sizeof(error),"Upload disconnected or timed out");goto done; }
+            count=n;
+        }
+        if(!count)break;
+        if(mbedtls_sha256_update(&hash,buffer,count)!=0)goto done;
+        err=esp_ota_write(handle,buffer,count);
+        if(err!=ESP_OK) { snprintf(error,sizeof(error),"esp_ota_write: %s",esp_err_to_name(err));goto done; }
+        received+=count;
+        vTaskDelay(1);
+    }
+    if(mbedtls_sha256_finish(&hash,actual_hash)!=0||memcmp(expected_hash,actual_hash,32)) {
+        snprintf(error,sizeof(error),"Image SHA256 mismatch; boot slot unchanged");goto done;
+    }
+    err=esp_ota_end(handle);begun=false;
+    if(err!=ESP_OK) { snprintf(error,sizeof(error),"Image verification: %s",esp_err_to_name(err));goto done; }
+    err=esp_ota_set_boot_partition(next);
+    if(err!=ESP_OK) { snprintf(error,sizeof(error),"Boot slot: %s",esp_err_to_name(err));goto done; }
+    success=true;
+done:
+    if(begun)esp_ota_abort(handle);
+    mbedtls_sha256_free(&hash);free(buffer);
+    if(!success) { atomic_store(&updating,false);return httpd_resp_send_err(r,HTTPD_400_BAD_REQUEST,error); }
+    httpd_resp_set_type(r,"application/json");httpd_resp_sendstr(r,"{\"verified\":true,\"restarting\":true}");
+    iq_request_restart();return ESP_OK;
+}
+#ifndef IQ_RECOVERY_BUILD
+static esp_err_t pico_handler(httpd_req_t *r)
+{
+    if(!authorized(r))return ESP_OK;
+    bool expected=false;
+    if(!atomic_compare_exchange_strong(&updating,&expected,true))
+        return httpd_resp_send_err(r,HTTPD_400_BAD_REQUEST,"Update already in progress");
+    char error[192]="Invalid Pico image",digest[65];unsigned char expected_hash[32],actual_hash[32];
+    uint8_t *data=NULL;bool success=false;
+    if(r->content_len<1024||r->content_len>IQ_UF2_MAX_BYTES||r->content_len%512) {
+        snprintf(error,sizeof(error),"Pico UF2 size must be 1024..1048576 bytes, divisible by 512");goto done;
+    }
+    if(httpd_req_get_hdr_value_len(r,"X-SHA256")!=64||
+       httpd_req_get_hdr_value_str(r,"X-SHA256",digest,sizeof(digest))!=ESP_OK||!hex_digest(digest,expected_hash)) {
+        snprintf(error,sizeof(error),"X-SHA256 must contain UF2 SHA256");goto done;
+    }
+    data=malloc(r->content_len);
+    if(!data) { snprintf(error,sizeof(error),"No memory for Pico upload");goto done; }
+    size_t received=0;int64_t deadline=esp_timer_get_time()+30000000;
+    while(received<r->content_len&&esp_timer_get_time()<deadline) {
+        size_t count=r->content_len-received;if(count>4096)count=4096;
+        int n=httpd_req_recv(r,(char*)data+received,count);
+        if(n<=0) { snprintf(error,sizeof(error),"Incomplete Pico upload; Pico unchanged");goto done; }
+        received+=n;
+    }
+    if(received!=r->content_len||mbedtls_sha256(data,received,actual_hash,0)!=0||memcmp(actual_hash,expected_hash,32)) {
+        snprintf(error,sizeof(error),"Pico upload deadline or SHA256 mismatch; Pico unchanged");goto done;
+    }
+    success=iq_pico_update(data,received,error,sizeof(error));
+done:
+    free(data);atomic_store(&updating,false);
+    if(!success)return httpd_resp_send_err(r,HTTPD_400_BAD_REQUEST,error);
+    cJSON *j=cJSON_CreateObject();cJSON_AddBoolToObject(j,"pico_boot_verified",true);
+    cJSON_AddStringToObject(j,"firmware","iqdata-pico-live");cJSON_AddStringToObject(j,"version","0.4.7");
+    cJSON_AddStringToObject(j,"board","pico2");cJSON_AddStringToObject(j,"upload_sha256",digest);
+    return json_reply(r,j);
+}
+#endif
+void iq_web_start(void)
+{
+    httpd_config_t config=HTTPD_DEFAULT_CONFIG();
+    config.stack_size=16384;config.recv_wait_timeout=5;config.send_wait_timeout=5;
+    config.lru_purge_enable=true;
+    httpd_handle_t server;ESP_ERROR_CHECK(httpd_start(&server,&config));
+    const httpd_uri_t handlers[]={
+        {.uri="/",.method=HTTP_GET,.handler=index_handler},
+        {.uri="/api/status",.method=HTTP_GET,.handler=status_handler},
+        {.uri="/api/points",.method=HTTP_GET,.handler=points_handler},
+        {.uri="/api/config",.method=HTTP_POST,.handler=config_handler},
+        {.uri="/api/firmware",.method=HTTP_POST,.handler=ota_handler},
+#ifndef IQ_RECOVERY_BUILD
+        {.uri="/api/pico/firmware",.method=HTTP_POST,.handler=pico_handler},
+#endif
+    };
+    for(unsigned i=0;i<sizeof(handlers)/sizeof(handlers[0]);++i)
+        ESP_ERROR_CHECK(httpd_register_uri_handler(server,&handlers[i]));
+}

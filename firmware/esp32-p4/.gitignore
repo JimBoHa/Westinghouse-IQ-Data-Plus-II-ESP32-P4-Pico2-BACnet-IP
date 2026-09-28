@@ -1,0 +1,5 @@
+sdkconfig
+sdkconfig.old
+sdkconfig.site*
+managed_components/
+build*/
