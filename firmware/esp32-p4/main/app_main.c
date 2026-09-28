@@ -115,6 +115,7 @@ cJSON *iq_status_json(void)
     cJSON_AddStringToObject(j,"project",app->project_name);
     cJSON_AddStringToObject(j,"version",app->version);
     cJSON_AddStringToObject(j,"source_revision",IQ_SOURCE_REVISION);
+    cJSON_AddStringToObject(j,"boot_id",iq_boot_id());
     char hash[65];for(unsigned i=0;i<32;++i)snprintf(hash+2*i,3,"%02x",app->app_elf_sha256[i]);
     cJSON_AddStringToObject(j,"elf_sha256",hash);
     cJSON_AddStringToObject(j,"board","ESP32-P4-WIFI6-POE-ETH");
@@ -188,13 +189,20 @@ cJSON *iq_points_json(void)
 {
     iq_value_t *values=malloc(sizeof(*values)*IQ_POINT_COUNT);
     if(!values)return NULL;
-    xSemaphoreTake(model_lock,portMAX_DELAY);iq_model_snapshot(model,now_ms(),values);xSemaphoreGive(model_lock);
+    uint64_t snapshot_ms=now_ms();
+    xSemaphoreTake(model_lock,portMAX_DELAY);iq_model_snapshot(model,snapshot_ms,values);xSemaphoreGive(model_lock);
     cJSON *array=cJSON_CreateArray();
     for(unsigned i=0;i<IQ_POINT_COUNT;++i) {
         cJSON *p=cJSON_CreateObject();cJSON_AddItemToArray(array,p);
         cJSON_AddStringToObject(p,"type",iq_points[i].object_type==0?"analog-input":"binary-input");
         cJSON_AddNumberToObject(p,"instance",iq_points[i].instance);cJSON_AddStringToObject(p,"name",iq_points[i].name);
         cJSON_AddStringToObject(p,"key",iq_points[i].key);cJSON_AddNumberToObject(p,"units",iq_points[i].units);
+        cJSON_AddStringToObject(p,"description",iq_points[i].description);
+        cJSON_AddStringToObject(p,"time_context",iq_points[i].time_context);
+        cJSON_AddNumberToObject(p,"max_age_seconds",iq_points[i].max_age);
+        if(values[i].stamp&&snapshot_ms>=values[i].stamp)
+            cJSON_AddNumberToObject(p,"age_seconds",(snapshot_ms-values[i].stamp)/1000.0);
+        else cJSON_AddNullToObject(p,"age_seconds");
         cJSON_AddNumberToObject(p,"value",values[i].value);cJSON_AddBoolToObject(p,"valid",values[i].valid);
         cJSON_AddStringToObject(p,"reliability",values[i].valid?"no-fault-detected":"communication-failure");
     }

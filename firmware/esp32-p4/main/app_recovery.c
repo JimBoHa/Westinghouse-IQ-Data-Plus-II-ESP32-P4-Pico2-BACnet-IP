@@ -41,6 +41,7 @@ cJSON *iq_status_json(void)
 {
     cJSON *j=cJSON_CreateObject();const esp_app_desc_t *app=esp_app_get_description();
     cJSON_AddStringToObject(j,"project",app->project_name);cJSON_AddStringToObject(j,"version",app->version);
+    cJSON_AddStringToObject(j,"boot_id",iq_boot_id());
     cJSON_AddBoolToObject(j,"recovery",true);cJSON_AddStringToObject(j,"ethernet_mac",mac_text);
     cJSON_AddStringToObject(j,"hostname",hostname);cJSON_AddNumberToObject(j,"reset_reason",esp_reset_reason());
     cJSON_AddNumberToObject(j,"uptime_seconds",esp_timer_get_time()/1000000.0);
@@ -56,6 +57,7 @@ cJSON *iq_status_json(void)
     esp_ota_img_states_t state=ESP_OTA_IMG_UNDEFINED;(void)esp_ota_get_state_partition(running,&state);
     cJSON_AddStringToObject(ota,"running_slot",running->label);cJSON_AddStringToObject(ota,"next_slot",next->label);
     cJSON_AddNumberToObject(ota,"slot_bytes",next->size);cJSON_AddNumberToObject(ota,"image_state",state);
+    cJSON_AddItemToObject(ota,"startup_health",iq_health_json());
     return j;
 }
 static void got_ip(void *arg,esp_event_base_t base,int32_t id,void *data)

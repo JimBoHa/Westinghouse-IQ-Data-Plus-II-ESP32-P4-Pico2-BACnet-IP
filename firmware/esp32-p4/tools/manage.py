@@ -15,7 +15,7 @@ def main():
     parser.add_argument("--token-file", type=Path)
     parser.add_argument("--pin-file", type=Path, required=True)
     sub = parser.add_subparsers(dest="command", required=True)
-    for command in ("pair", "status", "points", "auth-check", "diagnostics"):
+    for command in ("pair", "status", "points", "auth-check", "diagnostics", "reboot"):
         sub.add_parser(command)
     sub.add_parser("configure").add_argument("json_file", type=Path)
     sub.add_parser("update").add_argument("image", type=Path)
@@ -31,6 +31,8 @@ def main():
         print(json.dumps(client.request("/api/points"), indent=2));return
     if args.command == "diagnostics":
         print(json.dumps(client.request("/api/diagnostics", b"", authenticated=True), indent=2));return
+    if args.command == "reboot":
+        print(json.dumps(client.request("/api/reboot", b"", authenticated=True), indent=2));return
     if args.command == "auth-check":
         print(json.dumps(client.request("/api/auth/check", b"", authenticated=True), indent=2));return
     if args.command == "configure":

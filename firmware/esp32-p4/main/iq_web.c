@@ -62,6 +62,15 @@ static esp_err_t diagnostics_handler(httpd_req_t *r)
     if(r->content_len||!iq_security_body(r,"",0))return httpd_resp_send_err(r,HTTPD_400_BAD_REQUEST,"Expected empty authenticated body");
     return json_reply(r,iq_diagnostics_json());
 }
+static esp_err_t reboot_handler(httpd_req_t *r)
+{
+    if(!authorized(r))return ESP_OK;
+    if(r->content_len||!iq_security_body(r,"",0))return httpd_resp_send_err(r,HTTPD_400_BAD_REQUEST,"Expected empty authenticated body");
+    if(atomic_load(&updating))return httpd_resp_send_err(r,HTTPD_400_BAD_REQUEST,"Firmware update in progress");
+    cJSON *j=cJSON_CreateObject();cJSON_AddBoolToObject(j,"restarting",true);
+    esp_err_t result=json_reply(r,j);iq_event("management","restart_requested",0,"Authenticated restart requested");
+    iq_request_restart();return result;
+}
 static esp_err_t redirect_handler(httpd_req_t *r)
 {
     cJSON *status=iq_status_json();const cJSON *host=cJSON_GetObjectItemCaseSensitive(status,"hostname");
@@ -73,14 +82,26 @@ static esp_err_t status_handler(httpd_req_t *r) { return json_reply(r,iq_status_
 static esp_err_t points_handler(httpd_req_t *r) { return json_reply(r,iq_points_json()); }
 static esp_err_t index_handler(httpd_req_t *r)
 {
+    extern const char index_start[] asm("_binary_index_html_start");
     httpd_resp_set_type(r,"text/html; charset=utf-8");
-    return httpd_resp_sendstr(r,
-        "<!doctype html><html lang=en><meta charset=utf-8><meta name=viewport content='width=device-width'>"
-        "<title>IQ Data Plus II gateway</title><style>body{font:16px system-ui;max-width:960px;margin:3em auto;padding:0 1em}pre{white-space:pre-wrap;background:#f4f5f6;padding:1em}a{margin-right:1em}</style>"
-        "<h1>IQ Data Plus II gateway</h1><p>Read-only BACnet meter gateway. Check point quality before using readings.</p>"
-        "<p><a href=/api/status>Gateway status</a><a href=/api/points>Point values and quality</a></p>"
-        "<p>Commissioning and firmware updates require this gateway's private update token. Use the repository's Ethernet management tool.</p>"
-        "<pre id=s>Loading status...</pre><script>async function refresh(){try{let r=await fetch('/api/status',{cache:'no-store'});document.querySelector('#s').textContent=JSON.stringify(await r.json(),null,2)}catch(e){document.querySelector('#s').textContent='Gateway unavailable; retrying'}}refresh();setInterval(refresh,5000)</script></html>");
+    httpd_resp_set_hdr(r,"Cache-Control","no-store");
+    httpd_resp_set_hdr(r,"X-Content-Type-Options","nosniff");
+    httpd_resp_set_hdr(r,"Referrer-Policy","no-referrer");
+    httpd_resp_set_hdr(r,"Content-Security-Policy","default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'");
+    return httpd_resp_sendstr(r,index_start);
+}
+static esp_err_t script_handler(httpd_req_t *r)
+{
+    extern const char script_start[] asm("_binary_dashboard_js_start");
+    httpd_resp_set_type(r,"text/javascript; charset=utf-8");
+    httpd_resp_set_hdr(r,"Cache-Control","no-store");httpd_resp_set_hdr(r,"X-Content-Type-Options","nosniff");
+    return httpd_resp_sendstr(r,script_start);
+}
+static esp_err_t style_handler(httpd_req_t *r)
+{
+    extern const char style_start[] asm("_binary_dashboard_css_start");
+    httpd_resp_set_type(r,"text/css; charset=utf-8");httpd_resp_set_hdr(r,"Cache-Control","no-store");
+    httpd_resp_set_hdr(r,"X-Content-Type-Options","nosniff");return httpd_resp_sendstr(r,style_start);
 }
 static esp_err_t config_handler(httpd_req_t *r)
 {
@@ -242,11 +263,14 @@ void iq_web_start(void)
     httpd_handle_t server;ESP_ERROR_CHECK(httpd_ssl_start(&server,&config));
     const httpd_uri_t handlers[]={
         {.uri="/",.method=HTTP_GET,.handler=index_handler},
+        {.uri="/dashboard.js",.method=HTTP_GET,.handler=script_handler},
+        {.uri="/dashboard.css",.method=HTTP_GET,.handler=style_handler},
         {.uri="/api/status",.method=HTTP_GET,.handler=status_handler},
         {.uri="/api/points",.method=HTTP_GET,.handler=points_handler},
         {.uri="/api/auth/challenge",.method=HTTP_GET,.handler=challenge_handler},
         {.uri="/api/auth/check",.method=HTTP_POST,.handler=auth_check_handler},
         {.uri="/api/diagnostics",.method=HTTP_POST,.handler=diagnostics_handler},
+        {.uri="/api/reboot",.method=HTTP_POST,.handler=reboot_handler},
         {.uri="/api/pair",.method=HTTP_POST,.handler=pair_handler},
         {.uri="/api/config",.method=HTTP_POST,.handler=config_handler},
         {.uri="/api/firmware",.method=HTTP_POST,.handler=ota_handler},

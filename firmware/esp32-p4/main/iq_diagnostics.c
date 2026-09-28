@@ -42,6 +42,7 @@ static SemaphoreHandle_t mutex;
 static bool synchronized,clock_initialized,clock_started;
 static uint64_t last_sync_ms;
 static char boot_id[17];
+const char *iq_boot_id(void) { return boot_id; }
 static uint64_t monotonic_ms(void) { return esp_timer_get_time()/1000; }
 static int64_t utc_now(void)
 {
