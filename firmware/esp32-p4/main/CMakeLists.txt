@@ -3,7 +3,7 @@ if(IQ_RECOVERY_BUILD)
     set(app_source "app_recovery.c")
 endif()
 idf_component_register(SRCS ${app_source} "iq_points.c" "iq_decode.c" "iq_model.c"
-    "iq_transport.c" "iq_usb.c" "iq_config.c" "iq_web.c" "iq_health.c" "iq_security.c" "iq_diagnostics.c" "iq_uf2.c" "iq_pico_update.c" "gateway_bacnet.c" "bacnet_restart.c" "bip_port.c"
+    "iq_transport.c" "iq_usb.c" "iq_config.c" "iq_web.c" "iq_health.c" "iq_security.c" "iq_diagnostics.c" "iq_meter_trace.c" "iq_uf2.c" "iq_pico_update.c" "gateway_bacnet.c" "bacnet_restart.c" "bip_port.c"
     INCLUDE_DIRS "." PRIV_REQUIRES bacnet_stack esp_eth esp_netif esp_event esp_timer
     esp_http_server esp_https_server nvs_flash json lwip esp_app_format esp_driver_uart esp_driver_usb_serial_jtag
     usb esp_hw_support esp_system app_update esp_partition mbedtls bootloader_support

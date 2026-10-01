@@ -35,6 +35,10 @@ The progress bar measures upload, not flash completion. Wait for the explicit
 verified result. Recovery images expose gateway update and diagnostics only.
 
 Diagnostics download and safe reboot also require nonce/HMAC authentication.
+Maintenance can also refresh and inspect the eight most recent meter attempts,
+with exact failed checks, counters, pin snapshots and expandable protocol events.
+Refresh does not trigger a read. Traces are cleared from the view when a changed
+boot ID is observed; their raw reply words are diagnostic evidence, not readings.
 `manage.py ... reboot` exposes the same empty-body command. Diagnostic events
 remain RAM-only. A random boot ID is exposed for precise reboot verification.
 
