@@ -13,6 +13,7 @@
   <section id="overview" class="view">
     <div class="section-title"><h2>System health</h2><span id="updated" class="muted">Waiting for first sample</span></div>
     <div id="health" class="cards"></div>
+    <p id="meter-error" class="callout" hidden></p>
     <div class="columns">
       <article><h2>Gateway</h2><dl id="gateway-details"></dl></article>
       <article><h2>Boot &amp; network</h2><dl id="boot-details"></dl></article>
@@ -37,7 +38,8 @@
   <section id="maintenance" class="view" hidden>
     <div class="section-title"><div><h2>Maintenance</h2><p class="muted">Both processors update through this Ethernet connection.</p></div></div>
     <article><h3>Signed firmware update</h3><form id="update-form"><div class="form-grid"><label>Processor<select id="target"><option value="esp32p4">ESP32-P4 gateway</option><option value="pico2">Pico 2 meter interface</option></select></label><label>Firmware file<input id="image-file" type="file" accept=".bin,.uf2" required></label><label>Matching signature manifest<input id="signature-file" type="file" accept=".json" required></label></div><p class="muted">Choose the application .bin or Pico .uf2 and its matching .sig.json release file. Leave power connected during the update.</p><button id="upload" data-auth disabled>Verify and install</button></form><progress id="progress" max="100" value="0" hidden aria-label="Firmware upload progress"></progress><p id="update-result" role="status" aria-live="polite"></p></article>
-    <div class="columns"><article><h3>Diagnostic snapshot</h3><p>Download recent events and clock state. Events live in RAM and reset at reboot.</p><button id="download" data-auth disabled>Download diagnostics</button></article><article><h3>Restart gateway</h3><p>Stops the meter interface safely, then restarts both communication services.</p><button id="reboot" class="secondary" data-auth disabled>Restart gateway</button></article></div>
+    <article><h3>Meter communication diagnostics</h3><p>Inspect the last eight reads: failed checks, handshake progress, pin levels, counters and parsed events. Refresh only reads saved diagnostics; it does not start a meter transaction.</p><div class="actions"><button id="refresh-diagnostics" data-auth disabled>Refresh diagnostics</button><button id="download" class="secondary" data-auth disabled>Download diagnostics</button></div><p id="diagnostic-state" class="muted" role="status">No diagnostic snapshot loaded.</p><div id="meter-traces"></div><p class="muted">Traces live in RAM and reset at reboot. Download before maintenance. Pin levels are digital snapshots, not voltage measurements. Stop code 0 means the deadline expired; it does not prove a successful read.</p></article>
+    <article><h3>Restart gateway</h3><p>Stops the meter interface safely, then restarts both communication services.</p><button id="reboot" class="secondary" data-auth disabled>Restart gateway</button></article>
   </section>
   <aside class="access"><div><h2>Management access</h2><p id="auth-state">Locked · Reading status requires no key.</p><p class="muted">Load this device’s key only after verifying its HTTPS certificate against your commissioned pin. Key stays in this tab’s memory.</p></div><div class="access-controls"><label>Private key file<input id="key-file" type="file" accept=".key,.txt"></label><button id="forget" class="secondary" disabled>Lock management</button></div></aside>
 </main>

@@ -86,6 +86,11 @@ Read transactions are limited to `all_standard`, `flags`, `settings`, and `trip`
 
 Measurements and rolling histories exist only in RAM. Model storage is approximately 1.4 MiB, with bounded power/energy histories. Rolling 15-minute/hour/day values remain invalid until the corresponding continuous window is available. Restart, gaps, invalid sources and energy-counter decrease break the appropriate continuity. No database, measurement snapshot, recording or history-download feature is linked into the P4 application.
 
+Authenticated [meter diagnostics](docs/DIAGNOSTICS.md) retain eight bounded
+transaction traces in RAM, including failed checks, host/Pico counters, pin
+snapshots and parsed protocol events. These transport traces can contain raw
+reply words; they do not form a measurement history and disappear at reboot.
+
 The exact CSV identifiers and descriptions are retained for compatibility. Health counters AI400–AI408 count this P4 session; the upstream descriptions refer to persistent `poll_health` state, which this database-free port does not retain across restarts. BI2 (display verified) stays inactive because this port has no recorded physical-display comparison. Linux service history has no P4 equivalent. These limitations must be considered when interpreting the unchanged point catalog.
 
 ## Tests

@@ -6,7 +6,7 @@ const bytes = text => Uint8Array.from(text.match(/../g), x => parseInt(x, 16));
 const hash = async data => hex(await crypto.subtle.digest("SHA-256", data));
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 const units = {3:"A",5:"V",9:"kVA",11:"var",12:"kvar",15:"PF",18:"Wh",19:"kWh",27:"Hz",47:"W",48:"kW",71:"h",72:"min",73:"s",95:"",98:"%"};
-let state, identity, key, points = [], busy = false, refreshing = false, loadedConfig = false, proposedConfig;
+let state, identity, key, points = [], busy = false, refreshing = false, loadedConfig = false, proposedConfig, diagnosticBoot;
 
 function notice(message, error = false) {
   $("#notice").textContent = message; $("#notice").hidden = !message;
@@ -57,6 +57,10 @@ function detail(selector, pairs) {
   $(selector).replaceChildren(...pairs.flatMap(([label, value]) => [element("dt", label), element("dd", String(value))]));
 }
 function renderStatus() {
+  if (diagnosticBoot && diagnosticBoot !== state.boot_id) {
+    diagnosticBoot = undefined;$("#meter-traces").replaceChildren();
+    $("#diagnostic-state").textContent = "Gateway restarted. Refresh diagnostics for this boot.";
+  }
   if (state.recovery) {
     $("#identity").textContent = `${state.ethernet_mac} · Recovery firmware ${state.version}`;
     $("#connection").textContent = "Recovery";$("#connection").className = "badge pending";
@@ -65,6 +69,8 @@ function renderStatus() {
     notice("Recovery mode. Install the full ESP32-P4 application to restore BACnet and the Pico interface.");access();return;
   }
   const s = state, b = s.bacnet, r = b.restart_notification || {};
+  $("#meter-error").hidden = !s.pico.last_error;
+  $("#meter-error").textContent = s.pico.last_error ? `Last interface error: ${s.pico.last_error}. Inspect meter communication diagnostics in Maintenance.` : "";
   $("#identity").textContent = `${s.config.name} · Device ${s.config.device_instance} · ${s.ethernet_mac}`;
   $("#connection").textContent = "Connected"; $("#connection").className = "badge";
   $("#updated").textContent = `Updated ${new Date().toLocaleTimeString()}`;
@@ -85,6 +91,26 @@ function renderStatus() {
   detail("#boot-details",[["Restart notice",`${r.sent || 0} sent · ${r.failures || 0} failures`],["Boot timestamp",r.timestamp_source || "Pending"],["Boot UTC",r.boot_utc_ms ? new Date(r.boot_utc_ms).toISOString() : "Unavailable"],["Reset reason",s.reset_reason],["NTP server",s.clock.server || "Disabled"],["Instance checks",b.instance_checks],["COV timeouts",b.cov_timeouts]]);
   if (!loadedConfig) { fillConfig(); loadedConfig = true; }
   access();
+}
+function renderDiagnostics(snapshot) {
+  diagnosticBoot = snapshot.boot_id;
+  const meter = snapshot.meter_transactions, entries = meter?.entries || [];
+  $("#diagnostic-state").textContent = meter ? `${entries.length} retained / ${meter.total} reads this boot · ${meter.overwritten} overwritten · Snapshot ${new Date().toLocaleTimeString()}` : "This firmware does not expose meter transaction traces.";
+  const levels = pins => Object.entries(pins || {}).map(([pin,value]) => `${pin}: ${value === null ? "unknown" : value ? "HIGH" : "LOW"}`).join(" · ") || "Unavailable";
+  const observed = value => value === null || value === undefined ? "unknown" : String(value);
+  const rows = entries.map((entry,index) => {
+    const panel = document.createElement("details"), host = entry.host_observed, pico = entry.pico_reported;
+    panel.open = index === 0;
+    panel.append(element("summary",`#${entry.sequence} · ${entry.request_kind} · ${entry.buffer_accepted ? "Buffer accepted" : "Failed"} · ${(entry.uptime_ms/1000).toFixed(1)} s uptime`));
+    panel.append(element("p",entry.error || "Transport and data-buffer validation passed.",entry.buffer_accepted ? "ok" : "warn"));
+    panel.append(element("p",`Progress: ${entry.progress}. Failed checks: ${entry.failed_checks.join(", ") || (entry.terminal_checks_evaluated ? "none" : "terminal checks not reached")}.`));
+    panel.append(element("p",`Requests clocked: ${host.completed_requests}/${host.requests}; data words: ${host.data_words}; completions clocked: ${host.completed_completions}/${host.completions}. Events: host ${host.events}, Pico ${observed(pico.events)}.`));
+    panel.append(element("p",`Pico stop: ${pico.stop_name} (${observed(pico.stop_code)}); outputs released: ${observed(pico.released)}; elapsed: ${observed(pico.elapsed_us)} µs.`));
+    panel.append(element("p",`Initial pins — ${levels(entry.pin_levels.initial)}`),element("p",`Final pins — ${levels(entry.pin_levels.final)}`));
+    const raw = document.createElement("details");raw.append(element("summary",`Full transaction JSON · ${entry.event_trace.events.length} events retained · ${entry.event_trace.omitted} omitted`),element("pre",JSON.stringify(entry,null,2)));
+    panel.append(raw);return panel;
+  });
+  $("#meter-traces").replaceChildren(...(rows.length ? rows : [element("p","No retained meter transactions. Polling may be disabled or Pico not qualified.")]));
 }
 function renderPoints() {
   const search = $("#search").value.trim().toLowerCase(), quality = $("#quality").value;
@@ -199,10 +225,15 @@ $("#reboot").addEventListener("click",() => transaction(async () => {
 }));
 $("#download").addEventListener("click",() => transaction(async () => {
   const snapshot = await command("/api/diagnostics");
+  renderDiagnostics(snapshot);
   const blob = new Blob([JSON.stringify(snapshot,null,2)+"\n"],{type:"application/json"});
   const url = URL.createObjectURL(blob), link = document.createElement("a");link.href = url;
   link.download = `iqdata-diagnostics-${identity.replaceAll(":","")}-${Date.now()}.json`;link.click();setTimeout(() => URL.revokeObjectURL(url),1000);
   notice("Diagnostic snapshot downloaded.");
+}));
+$("#refresh-diagnostics").addEventListener("click",() => transaction(async () => {
+  renderDiagnostics(await command("/api/diagnostics"));
+  notice("Diagnostic snapshot refreshed. No meter read was started.");
 }));
 $("#update-form").addEventListener("submit",event => {
   event.preventDefault();transaction(async () => {

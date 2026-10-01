@@ -1,4 +1,5 @@
 #include "iq_diagnostics.h"
+#include "iq_meter_trace.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -36,8 +37,10 @@ cJSON *iq_event_json(const iq_event_ring_t *ring)
 #include "esp_random.h"
 #include "esp_timer.h"
 #include "esp_system.h"
+#include "esp_app_desc.h"
 #include "sdkconfig.h"
 static iq_event_ring_t ring;
+static iq_transaction_ring_t transactions;
 static SemaphoreHandle_t mutex;
 static bool synchronized,clock_initialized,clock_started;
 static uint64_t last_sync_ms;
@@ -63,6 +66,13 @@ void iq_event(const char *component,const char *event,int code,const char *detai
     if(!mutex)return;
     xSemaphoreTake(mutex,portMAX_DELAY);
     iq_event_append(&ring,monotonic_ms(),utc_now(),component,event,code,detail);
+    xSemaphoreGive(mutex);
+}
+void iq_meter_transaction(const iq_stream_t *stream,uint64_t host_elapsed_ms,bool accepted)
+{
+    if(!mutex)return;
+    xSemaphoreTake(mutex,portMAX_DELAY);
+    iq_transaction_append(&transactions,stream,monotonic_ms(),utc_now(),host_elapsed_ms,accepted);
     xSemaphoreGive(mutex);
 }
 static void time_synced(struct timeval *time)
@@ -106,8 +116,14 @@ cJSON *iq_clock_json(void)
 cJSON *iq_diagnostics_json(void)
 {
     iq_event_ring_t *snapshot=malloc(sizeof(*snapshot));if(!snapshot)return NULL;
-    xSemaphoreTake(mutex,portMAX_DELAY);*snapshot=ring;xSemaphoreGive(mutex);
+    iq_transaction_ring_t *meter=malloc(sizeof(*meter));if(!meter){free(snapshot);return NULL;}
+    xSemaphoreTake(mutex,portMAX_DELAY);*snapshot=ring;*meter=transactions;xSemaphoreGive(mutex);
     cJSON *j=iq_event_json(snapshot);free(snapshot);
+    cJSON *traces=iq_transaction_ring_json(meter);free(meter);
+    if(!j||!traces){cJSON_Delete(j);cJSON_Delete(traces);return NULL;}
+    cJSON_AddItemToObject(j,"meter_transactions",traces);
+    cJSON_AddStringToObject(j,"firmware_version",esp_app_get_description()->version);
+    cJSON_AddStringToObject(j,"source_revision",IQ_SOURCE_REVISION);
     cJSON_AddStringToObject(j,"boot_id",boot_id);cJSON_AddItemToObject(j,"clock",iq_clock_json());return j;
 }
 #endif
