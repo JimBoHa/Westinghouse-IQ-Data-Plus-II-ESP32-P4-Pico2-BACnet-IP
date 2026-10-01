@@ -6,6 +6,23 @@
 #include <stdio.h>
 #include <string.h>
 
+const char *const iq_result_names[IQ_RESULT_COUNT]={
+    "stop_code","elapsed_us","clock_rises","rw_falls","rw_rises","data_edges",
+    "int_edges","max_loop_us","late_loops","events","valid_write_lengths",
+    "malformed_writes","requests","completions","initial_pins","final_pins",
+    "startup_retries_before","startup_retries_after"
+};
+const char *const iq_check_names[IQ_CHECK_COUNT]={
+    "firmware_stop","malformed_writes","outputs_not_released","event_total_mismatch",
+    "request_total_mismatch","completion_total_mismatch","write_total_mismatch",
+    "request_not_clocked_completely","write_without_completion",
+    "completion_not_clocked_completely","image_still_active","no_meter_data_words"
+};
+const char *const iq_trace_names[IQ_TRACE_COUNT]={
+    "unknown","request_presented","completion_presented","read_poll",
+    "clock_only_fragment","empty_write","meter_write_candidate","fault"
+};
+
 static const cJSON *field(const cJSON *j,const char *key)
 { return cJSON_GetObjectItemCaseSensitive(j,key); }
 static bool string_is(const cJSON *j,const char *key,const char *value)
@@ -36,9 +53,22 @@ void iq_stream_error(iq_stream_t *s,const char *error)
 }
 void iq_stream_init(iq_stream_t *s,iq_kind_t kind,uint16_t address)
 {
-    memset(s,0,sizeof(*s)); s->kind=kind; s->address=address; s->stop=-1;
+    memset(s,0,sizeof(*s)); s->kind=kind; s->address=address; s->stop=-1;s->released=-1;
     s->payload=iq_request_payload(kind,address); s->image=5|(s->payload<<3);
     if(s->payload==UINT32_MAX) iq_stream_error(s,"Invalid allowlisted read request");
+}
+
+static void capture_event(iq_stream_t *s,const cJSON *j)
+{
+    iq_trace_event_t e={.data_released=-1};
+    if(!number(j,"us",&e.us)||!number(j,"origin_code",&e.origin)||
+       !number(j,"clocks",&e.clocks)||!number(j,"word",&e.word))return;
+    for(unsigned i=1;i<IQ_TRACE_COUNT;i++)if(string_is(j,"event",iq_trace_names[i]))e.kind=i;
+    const cJSON *released=field(j,"data_released_during_write");
+    if(cJSON_IsBool(released))e.data_released=cJSON_IsTrue(released);
+    s->trace[s->trace_next]=e;s->trace_next=(s->trace_next+1)%IQ_TRACE_EVENT_CAPACITY;
+    if(s->trace_count<IQ_TRACE_EVENT_CAPACITY)++s->trace_count;
+    ++s->trace_total;
 }
 
 static bool record(iq_stream_t *s,const cJSON *j)
@@ -59,27 +89,42 @@ static bool record(iq_stream_t *s,const cJSON *j)
         s->started=true; return true;
     }
     if(!s->started) { iq_stream_error(s,"Response outside start/result boundary"); return false; }
-    if(string_is(j,"type","timing")) return true;
+    if(string_is(j,"type","timing")) {
+        s->timing_pio=string_is(j,"engine","pio");(void)number(j,"clock_hz",&s->clock_hz);
+        return true;
+    }
     if(string_is(j,"type","result")) {
+        for(unsigned i=0;i<IQ_RESULT_COUNT;i++)
+            if(number(j,iq_result_names[i],&s->result[i]))s->result_present|=1u<<i;
+        const cJSON *released=field(j,"released");
+        if(cJSON_IsBool(released))s->released=cJSON_IsTrue(released);
         uint32_t stop;
         if(number(j,"stop_code",&stop)&&stop<=INT32_MAX) s->stop=(int)stop;
         (void)number(j,"malformed_writes",&s->malformed);
         s->terminal=true;
+        const bool checks[IQ_CHECK_COUNT]={
+            s->stop==0,is_number(j,"malformed_writes",0),cJSON_IsTrue(released),
+            is_number(j,"events",s->events),is_number(j,"requests",s->requests),
+            is_number(j,"completions",s->completions),is_number(j,"valid_write_lengths",s->writes),
+            s->completed_requests==s->requests,s->writes==s->completions,
+            s->completed_completions==s->completions,s->active_origin==0,s->word_count!=0
+        };
+        for(unsigned i=0;i<IQ_CHECK_COUNT;i++)if(!checks[i])s->failed_checks|=1u<<i;
         if(s->stop!=0||!is_number(j,"malformed_writes",0)||!cJSON_IsTrue(field(j,"released"))) {
             const cJSON *released=field(j,"released");
             const char *state=cJSON_IsTrue(released)?"true":cJSON_IsFalse(released)?"false":"unknown";
             char error[128]; snprintf(error,sizeof(error),"Firmware stop_code=%d malformed_writes=%lu released=%s",s->stop,(unsigned long)s->malformed,state);
             iq_stream_error(s,error); return false;
         }
-        if(!is_number(j,"events",s->events)||!is_number(j,"requests",s->requests)||
-           !is_number(j,"completions",s->completions)||!is_number(j,"valid_write_lengths",s->writes)||
-           s->completed_requests!=s->requests||s->writes!=s->completions||
-           s->completed_completions!=s->completions||s->active_origin||!s->word_count) {
-            iq_stream_error(s,"Incomplete response or inconsistent event totals"); return false;
+        if(s->failed_checks) {
+            unsigned first=0;while(!(s->failed_checks&(1u<<first)))++first;
+            char error[192];snprintf(error,sizeof(error),"Meter response rejected: %s (see meter_transactions)",iq_check_names[first]);
+            iq_stream_error(s,error);return false;
         }
         return true;
     }
     if(!string_is(j,"type","event")) { iq_stream_error(s,"Unexpected USB record type"); return false; }
+    capture_event(s,j);
     uint32_t at,origin,clocks,word;
     if(++s->events>4096||!number(j,"us",&at)||at>600000||
        (s->have_time&&at<s->last_us)||!number(j,"origin_code",&origin)||
@@ -138,9 +183,11 @@ bool iq_stream_feed(iq_stream_t *s,const void *bytes,size_t length)
 {
     const unsigned char *data=bytes;
     for(size_t i=0;i<length&&!s->failed;++i) {
+        ++s->bytes_received;
         unsigned ch=data[i];
         if(ch=='\r') continue;
         if(ch=='\n') {
+            ++s->records_received;
             s->line[s->used]=0;
             cJSON *j=cJSON_ParseWithLengthOpts(s->line,s->used+1,NULL,true);
             if(!j) iq_stream_error(s,"Malformed serial JSON");

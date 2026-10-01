@@ -177,6 +177,84 @@ class PortTests(unittest.TestCase):
         self.assertEqual(got["stop"], 0)
         self.assertEqual(got["error"], "disconnect after terminal")
 
+    @staticmethod
+    def terminal_for(records, **extra):
+        events = [r for r in records if r["type"] == "event"]
+        return dict(type="result", stop_code=0, malformed_writes=0, released=True,
+                    events=len(events), requests=sum(r["event"] == "request_presented" for r in events),
+                    completions=sum(r["event"] == "completion_presented" for r in events),
+                    valid_write_lengths=sum(r["event"] == "meter_write_candidate" for r in events), **extra)
+
+    def test_diagnostics_distinguish_missing_reply_and_unclocked_request(self):
+        base = self.stream_records()
+        for count, expected in ((2, {"request_not_clocked_completely", "image_still_active", "no_meter_data_words"}),
+                                (3, {"no_meter_data_words"})):
+            records = base[:count]
+            records.append(self.terminal_for(records, elapsed_us=500001, initial_pins=14, final_pins=10,
+                                             clock_rises=0, data_edges=0, int_edges=2))
+            got = self.stream(records, chunk=3)
+            self.assertFalse(got["ok"])
+            d = got["diagnostics"]
+            self.assertEqual(set(d["failed_checks"]), expected)
+            self.assertTrue(d["terminal_checks_evaluated"])
+            self.assertEqual(d["pico_reported"]["stop_name"], "deadline")
+            self.assertEqual(d["pico_reported"]["clock_rises"], 0)
+            self.assertIsNone(d["pico_reported"]["rw_falls"])
+            self.assertEqual(d["pin_levels"]["initial"], dict(CLK_GP0=False, RW_GP1=True, DATA_GP2=True, INT_GP3=True))
+            self.assertFalse(d["pin_levels"]["final"]["DATA_GP2"])
+            self.assertNotIn("event_total_mismatch", d["failed_checks"])
+            self.assertEqual(d["host_observed"]["data_words"], 0)
+
+    def test_diagnostics_completion_repeat_and_accounting_failures(self):
+        base = self.stream_records()
+        # A completed repeat-control exchange is still not meter measurement data.
+        records = base[:6]
+        d = self.stream(records + [self.terminal_for(records)])["diagnostics"]
+        self.assertEqual(d["failed_checks"], ["no_meter_data_words"])
+        self.assertEqual(d["progress"], "repeat_handshake_completed")
+        # The last DATA word arrived, but its completion was never presented/clocked.
+        for trim, check in ((3, "write_without_completion"), (2, "completion_not_clocked_completely")):
+            records = base[:-trim]
+            d = self.stream(records + [self.terminal_for(records)])["diagnostics"]
+            self.assertIn(check, d["failed_checks"])
+            self.assertEqual(d["host_observed"]["data_words"], 2)
+            self.assertEqual(d["progress"], "meter_data_received")
+        base[-1]["events"] += 1
+        d = self.stream(base)["diagnostics"]
+        self.assertEqual(d["failed_checks"], ["event_total_mismatch"])
+        self.assertEqual(d["pico_reported"]["events"], d["host_observed"]["events"] + 1)
+
+    def test_diagnostics_preserve_missing_terminal_partial_record_and_later_error(self):
+        base = self.stream_records()
+        d = self.stream(base[:-1])["diagnostics"]
+        self.assertFalse(d["terminal_checks_evaluated"])
+        self.assertIsNone(d["pico_reported"]["stop_code"])
+        self.assertIsNone(d["pico_reported"]["released"])
+        self.assertIsNone(d["pin_levels"]["initial"]["CLK_GP0"])
+        d = self.stream(base, transport_error="USB disconnected after terminal")["diagnostics"]
+        self.assertEqual(d["pico_reported"]["stop_code"], 0)
+        self.assertEqual(d["outcome"], "stream_rejected")
+        self.assertFalse(d["buffer_accepted"])
+        text = json.dumps(base[0]) + '\n{"type":"res'
+        d = self.call("stream", kind="flags", text=text)["diagnostics"]
+        self.assertEqual(d["error"], "Partial USB response")
+        self.assertEqual(d["host_observed"]["partial_record_bytes"], 12)
+
+    def test_diagnostics_trace_is_bounded_and_chronological(self):
+        records = self.stream_records()[:1]
+        records += [dict(type="event", event="empty_write", us=i, origin_code=3, clocks=0, word=0)
+                    for i in range(1, 101)]
+        records.append(self.terminal_for(records))
+        d = self.stream(records, chunk=7)["diagnostics"]
+        trace = d["event_trace"]
+        self.assertEqual(trace["capacity"], 64)
+        self.assertEqual(trace["total"], 100)
+        self.assertEqual(trace["omitted"], 36)
+        self.assertEqual([e["sequence"] for e in trace["events"]], list(range(37, 101)))
+        self.assertEqual([e["us"] for e in trace["events"]], list(range(37, 101)))
+        self.assertEqual(d["host_observed"]["events"], 100)
+        self.assertEqual(d["failed_checks"], ["no_meter_data_words"])
+
     def test_commissioning_rejects_protected_or_malformed_configuration(self):
         base = dict(device_instance=75201, name="IQData-Test", dhcp=True, poll_enabled=False)
         self.assertTrue(self.call("config", text=json.dumps(base))["ok"])
