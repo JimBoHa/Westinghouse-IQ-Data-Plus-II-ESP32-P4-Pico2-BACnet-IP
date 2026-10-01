@@ -147,6 +147,7 @@ static bool transact(cdc_acm_dev_hdl_t device,iq_kind_t kind,uint32_t *flags)
     if(good) good=iq_model_accept(model,kind,stream.words,stream.word_count,finished,(finished-began)/1000.0,stream.stop,stream.malformed);
     else iq_model_fail(model,kind,finished,(finished-began)/1000.0,stream.stop,stream.malformed);
     xSemaphoreGive(model_lock);
+    iq_meter_transaction(&stream,finished-began,good);
     if(good&&kind==IQ_FLAGS&&flags) *flags=(stream.words[1]>>1)&0x7fffff;
     if(!good) {
         failure(stream.failed?stream.error:"Invalid meter DATA buffer");

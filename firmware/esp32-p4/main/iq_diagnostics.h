@@ -2,6 +2,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include "cJSON.h"
+#include "iq_transport.h"
 #define IQ_EVENT_CAPACITY 32
 typedef struct {
     uint64_t sequence, uptime_ms;
@@ -22,6 +23,7 @@ bool iq_clock_utc(int64_t *utc_ms);
 cJSON *iq_clock_json(void);
 cJSON *iq_diagnostics_json(void);
 void iq_event(const char *component,const char *event,int code,const char *detail);
+void iq_meter_transaction(const iq_stream_t *stream,uint64_t host_elapsed_ms,bool accepted);
 #else
 static inline void iq_event(const char *component,const char *event,int code,const char *detail)
 { (void)component;(void)event;(void)code;(void)detail; }

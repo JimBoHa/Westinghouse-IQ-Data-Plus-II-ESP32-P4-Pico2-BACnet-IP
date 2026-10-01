@@ -1,6 +1,7 @@
 /* Native-only test driver. Never linked into production firmware. */
 #include "iq_model.h"
 #include "iq_transport.h"
+#include "iq_meter_trace.h"
 #include "iq_config.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -64,6 +65,8 @@ int main(void)
             cJSON_AddBoolToObject(out,"ok",iq_stream_finish(&s));
             cJSON_AddStringToObject(out,"error",s.error);
             cJSON_AddNumberToObject(out,"stop",s.stop);
+            iq_transaction_trace_t trace={.stream=s,.accepted=!s.failed&&s.terminal};
+            cJSON_AddItemToObject(out,"diagnostics",iq_transaction_json(&trace));
             cJSON *a=cJSON_AddArrayToObject(out,"words");
             for(unsigned i=0;i<s.word_count;++i)cJSON_AddItemToArray(a,cJSON_CreateNumber(s.words[i]));
         } else if(!strcmp(op,"config")) {

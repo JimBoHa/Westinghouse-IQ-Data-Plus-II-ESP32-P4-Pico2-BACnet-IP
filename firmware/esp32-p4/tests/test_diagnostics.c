@@ -1,4 +1,5 @@
 #include "iq_diagnostics.h"
+#include "iq_meter_trace.h"
 #include <assert.h>
 #include <string.h>
 int main(void)
@@ -18,5 +19,17 @@ int main(void)
     assert(cJSON_GetObjectItem(cJSON_GetArrayItem(a,0),"sequence")->valueint==102);
     assert(cJSON_GetObjectItem(cJSON_GetArrayItem(a,31),"sequence")->valueint==71);
     assert(strlen(cJSON_GetObjectItem(cJSON_GetArrayItem(a,0),"detail")->valuestring)==159);
+    cJSON_Delete(j);
+    iq_transaction_ring_t meter={0};iq_stream_t stream;
+    iq_stream_init(&stream,IQ_STANDARD,0);
+    iq_stream_error(&stream,"No terminal response before bounded command deadline");
+    for(unsigned i=0;i<12;i++)iq_transaction_append(&meter,&stream,1000+i,0,5500,false);
+    assert(meter.total==12&&meter.count==8);
+    j=iq_transaction_ring_json(&meter);a=cJSON_GetObjectItem(j,"entries");
+    assert(cJSON_GetArraySize(a)==8);
+    assert(cJSON_GetObjectItem(j,"overwritten")->valueint==4);
+    assert(cJSON_GetObjectItem(cJSON_GetArrayItem(a,0),"sequence")->valueint==12);
+    assert(cJSON_GetObjectItem(cJSON_GetArrayItem(a,7),"sequence")->valueint==5);
+    assert(cJSON_IsNull(cJSON_GetObjectItem(cJSON_GetArrayItem(a,0),"utc_ms")));
     cJSON_Delete(j);return 0;
 }
