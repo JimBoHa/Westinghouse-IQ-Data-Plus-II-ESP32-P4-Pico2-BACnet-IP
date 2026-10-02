@@ -14,6 +14,7 @@ function notice(message, error = false) {
 }
 function access() {
   document.querySelectorAll("[data-auth]").forEach(button => button.disabled = !key || busy || !state?.ota?.startup_health?.accepted);
+  $("#observe-pins").disabled ||= !!state?.recovery || !!state?.config?.poll_enabled || !state?.pico?.qualified;
   $("#forget").disabled = !key || busy; $("#key-file").disabled = busy;
   $("#auth-state").textContent = key ? "Unlocked for this tab · Commands authenticated" : "Locked · Reading status requires no key.";
 }
@@ -60,6 +61,7 @@ function renderStatus() {
   if (diagnosticBoot && diagnosticBoot !== state.boot_id) {
     diagnosticBoot = undefined;$("#meter-traces").replaceChildren();
     $("#diagnostic-state").textContent = "Gateway restarted. Refresh diagnostics for this boot.";
+    $("#passive-result").textContent = "Gateway restarted. No passive observation loaded.";
   }
   if (state.recovery) {
     $("#identity").textContent = `${state.ethernet_mac} · Recovery firmware ${state.version}`;
@@ -94,6 +96,14 @@ function renderStatus() {
 }
 function renderDiagnostics(snapshot) {
   diagnosticBoot = snapshot.boot_id;
+  const probe = snapshot.passive_observation;
+  const passive = $("#passive-result");passive.replaceChildren();
+  if (probe && probe.state !== "idle") {
+    const result = probe.result;
+    passive.append(element("p",`Observation #${probe.sequence}: ${probe.state}. ${probe.error || (probe.full_duration ? "Full 500 ms captured." : "Full duration not confirmed.")}`));
+    if (result.clock_rises !== null) passive.append(element("p",`Sampled CLK rises: ${result.clock_rises}; RW falls/rises: ${result.rw_falls}/${result.rw_rises}; DATA/INT edges: ${result.data_edges}/${result.int_edges}. Stop ${result.stop_code}; elapsed ${result.elapsed_us} µs.`));
+    const raw = document.createElement("details");raw.append(element("summary","Passive observation JSON"),element("pre",JSON.stringify(probe,null,2)));passive.append(raw);
+  } else passive.textContent = "No passive observation recorded this boot.";
   const meter = snapshot.meter_transactions, entries = meter?.entries || [];
   $("#diagnostic-state").textContent = meter ? `${entries.length} retained / ${meter.total} reads this boot · ${meter.overwritten} overwritten · Snapshot ${new Date().toLocaleTimeString()}` : "This firmware does not expose meter transaction traces.";
   const levels = pins => Object.entries(pins || {}).map(([pin,value]) => `${pin}: ${value === null ? "unknown" : value ? "HIGH" : "LOW"}`).join(" · ") || "Unavailable";
@@ -234,6 +244,19 @@ $("#download").addEventListener("click",() => transaction(async () => {
 $("#refresh-diagnostics").addEventListener("click",() => transaction(async () => {
   renderDiagnostics(await command("/api/diagnostics"));
   notice("Diagnostic snapshot refreshed. No meter read was started.");
+}));
+$("#observe-pins").addEventListener("click",() => transaction(async () => {
+  const queued = await command("/api/pico/observe"), deadline = Date.now()+20000;
+  notice("Sampling inputs for 500 ms; waiting for Pico report.");
+  while (Date.now()<deadline) {
+    const snapshot = await command("/api/diagnostics"), probe = snapshot.passive_observation;
+    if (snapshot.boot_id !== queued.boot_id || probe?.sequence !== queued.sequence) throw new Error("Gateway restarted or observation replaced. Refresh diagnostics.");
+    renderDiagnostics(snapshot);
+    if (probe.state === "failed") throw new Error(probe.error);
+    if (probe.state === "complete") { notice("Passive observation captured. Meter readings remain unvalidated.");return; }
+    await pause(500);
+  }
+  throw new Error("Passive observation timed out. Refresh diagnostics.");
 }));
 $("#update-form").addEventListener("submit",event => {
   event.preventDefault();transaction(async () => {

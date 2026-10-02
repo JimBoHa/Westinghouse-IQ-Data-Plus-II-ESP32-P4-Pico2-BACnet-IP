@@ -1,6 +1,7 @@
 #include "iq_usb.h"
 #include "iq_diagnostics.h"
 #include "iq_transport.h"
+#include "iq_observe.h"
 #include "iq_pico_update.h"
 #include <stdatomic.h>
 #include <stdio.h>
@@ -17,6 +18,8 @@ static SemaphoreHandle_t model_lock,status_lock;
 static const iq_config_t *settings;
 static StreamBufferHandle_t receive;
 static iq_usb_status_t status;
+static iq_observe_t observation;
+static bool observation_active;
 static atomic_bool disconnected,overflow,stopping,maintenance_requested;
 static atomic_int driver_error;
 static uint64_t now_ms(void) { return esp_timer_get_time()/1000; }
@@ -44,6 +47,31 @@ void iq_usb_status(iq_usb_status_t *out)
     xSemaphoreTake(status_lock,portMAX_DELAY);*out=status;xSemaphoreGive(status_lock);
 }
 void iq_usb_stop(void) { atomic_store(&stopping,true); }
+bool iq_usb_observe_begin(uint32_t *sequence,char *error,size_t size)
+{
+    if(!status_lock) { snprintf(error,size,"Pico worker unavailable");return false; }
+    xSemaphoreTake(status_lock,portMAX_DELAY);
+    const char *reason=NULL;
+    if(settings->poll_enabled)reason="Disable meter polling before passive observation";
+    else if(!status.connected||!status.qualified||atomic_load(&disconnected)||
+            atomic_load(&overflow)||atomic_load(&driver_error))reason="Qualified Pico required";
+    else if(atomic_load(&stopping)||atomic_load(&maintenance_requested)||status.maintenance)
+        reason="Pico is stopping or in firmware maintenance";
+    else if(observation_active||observation.state==IQ_OBSERVE_QUEUED)reason="Passive observation already in progress";
+    if(reason)snprintf(error,size,"%s",reason);
+    else {
+        uint32_t next=observation.sequence+1;
+        observation=(iq_observe_t){.state=IQ_OBSERVE_QUEUED,.sequence=next,.queued_ms=now_ms()};
+        *sequence=next;
+    }
+    xSemaphoreGive(status_lock);return !reason;
+}
+cJSON *iq_usb_observe_json(void)
+{
+    iq_observe_t snapshot={0};
+    if(status_lock) { xSemaphoreTake(status_lock,portMAX_DELAY);snapshot=observation;xSemaphoreGive(status_lock); }
+    return iq_observe_json(&snapshot);
+}
 bool iq_usb_maintenance_begin(char *error,size_t size)
 {
     iq_event("usb","maintenance",0,"Releasing meter transaction for firmware maintenance");
@@ -158,6 +186,56 @@ static bool transact(cdc_acm_dev_hdl_t device,iq_kind_t kind,uint32_t *flags)
     return good;
 }
 
+static void observe(cdc_acm_dev_hdl_t device)
+{
+    iq_observe_t probe;bool pending=false;
+    xSemaphoreTake(status_lock,portMAX_DELAY);
+    if(observation.state==IQ_OBSERVE_QUEUED) {
+        observation.state=IQ_OBSERVE_RUNNING;observation_active=true;probe=observation;pending=true;
+    }
+    xSemaphoreGive(status_lock);
+    if(!pending)return;
+    char error[192]={0};uint8_t bytes[512];unsigned command_phase=0;
+    uint64_t until=now_ms()+8000,quiet_until=0;
+    if(!send(device,"status\n",error,sizeof(error)))iq_observe_error(&probe,error);
+    while(probe.state!=IQ_OBSERVE_FAILED&&now_ms()<until) {
+        xSemaphoreTake(status_lock,portMAX_DELAY);status.heartbeat_ms=now_ms();xSemaphoreGive(status_lock);
+        if(atomic_load(&stopping)||atomic_load(&maintenance_requested)||settings->poll_enabled) {
+            iq_observe_error(&probe,"Passive observation interrupted by maintenance or shutdown");break;
+        }
+        if(atomic_load(&disconnected)||atomic_load(&overflow)||atomic_load(&driver_error)) {
+            iq_observe_error(&probe,"Pico USB fault during passive observation");break;
+        }
+        size_t n=xStreamBufferReceive(receive,bytes,sizeof(bytes),pdMS_TO_TICKS(10));
+        if(n&&!iq_observe_feed(&probe,bytes,n))break;
+        if(probe.phase==1&&command_phase==0) {
+            if(!send(device,"observe 500\n",error,sizeof(error)))iq_observe_error(&probe,error);
+            command_phase=1;
+        } else if(probe.phase==4&&command_phase==1) {
+            if(!send(device,"status\n",error,sizeof(error)))iq_observe_error(&probe,error);
+            command_phase=2;
+        }
+        if(probe.phase==5&&!quiet_until)quiet_until=now_ms()+100;
+        if(quiet_until&&now_ms()>=quiet_until)break;
+    }
+    bool good=iq_observe_finish(&probe);probe.finished_ms=now_ms();
+    memset(probe.line,0,sizeof(probe.line));
+    xSemaphoreTake(status_lock,portMAX_DELAY);observation=probe;xSemaphoreGive(status_lock);
+    iq_event("usb",good?"passive_complete":"passive_failed",good?0:1,
+        good?"Input-only capture completed; this does not validate meter telemetry":probe.error);
+    if(!good&&!atomic_load(&disconnected)&&!atomic_load(&stopping)) {
+        (void)send(device,"abort\n",error,sizeof(error));drain(4500);
+        if(!atomic_load(&maintenance_requested)&&!atomic_load(&overflow)&&!atomic_load(&driver_error)) {
+            /* Keep the claimed CDC endpoint, just as for failed meter reads. */
+            if(!identify(device)) {
+                xSemaphoreTake(status_lock,portMAX_DELAY);status.qualified=false;xSemaphoreGive(status_lock);
+                atomic_store(&driver_error,ESP_FAIL); /* Normal worker fault path reopens and qualifies. */
+            }
+        }
+    }
+    xSemaphoreTake(status_lock,portMAX_DELAY);observation_active=false;xSemaphoreGive(status_lock);
+}
+
 static void poll_task(void *arg)
 {
     (void)arg;
@@ -171,6 +249,12 @@ static void poll_task(void *arg)
     for(;;) {
         xSemaphoreTake(status_lock,portMAX_DELAY);
         status.heartbeat_ms=now_ms();status.stopping=atomic_load(&stopping);
+        if(observation.state==IQ_OBSERVE_QUEUED&&
+           (now_ms()-observation.queued_ms>2000||atomic_load(&stopping)||
+            atomic_load(&maintenance_requested)||atomic_load(&disconnected)||settings->poll_enabled)) {
+            iq_observe_error(&observation,"Queued observation expired or Pico became unavailable");
+            observation.finished_ms=now_ms();
+        }
         xSemaphoreGive(status_lock);
         if(atomic_load(&stopping)) {
             if(device) { char error[192];(void)send(device,"abort\n",error,sizeof(error));
@@ -248,7 +332,8 @@ static void poll_task(void *arg)
             xSemaphoreTake(status_lock,portMAX_DELAY);status.connected=status.qualified=false;xSemaphoreGive(status_lock);
             continue;
         }
-        if(!settings->poll_enabled||now_ms()<next) { vTaskDelay(pdMS_TO_TICKS(25));continue; }
+        if(!settings->poll_enabled) { observe(device);vTaskDelay(pdMS_TO_TICKS(25));continue; }
+        if(now_ms()<next) { vTaskDelay(pdMS_TO_TICKS(25));continue; }
         iq_kind_t kind=IQ_STANDARD;
         if(diagnostic_slot) for(unsigned k=IQ_FLAGS;k<IQ_KIND_COUNT;++k)
             if(due[k]<=now_ms()&&(kind==IQ_STANDARD||due[k]<due[kind])) kind=k;

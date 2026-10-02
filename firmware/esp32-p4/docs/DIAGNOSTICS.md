@@ -68,6 +68,42 @@ The response includes firmware/source revision and boot ID to identify the
 capture. All traces reset on reboot; there is no flash log, database, automatic
 address scan or change to BACnet point identifiers.
 
+## Passive pin observation
+
+Firmware 0.4.3 adds an authenticated, empty `POST /api/pico/observe` and the
+Maintenance **Observe pins (500 ms)** button. `manage.py ... observe` runs the
+same operation. Polling must be disabled, Pico must be qualified, and no other
+observation or firmware maintenance may be active. The endpoint queues one
+fixed `observe 500` command on the USB worker; it accepts no command text,
+address, pin, duration, or drive settings. No Pico firmware change is needed.
+
+The worker reads `status` before and after, checking inactive capture, zero SIO
+output enables, SIO pin function, LOW output overrides and forced-disabled CLK/RW
+outputs against the qualified RP2350 firmware. This uses RP2350 CTRL layouts,
+not RP2040 register bit positions. The CPU observer samples all four pins with
+outputs released. Its `clock_rises` counts sampled rising edges even when a
+27-clock exchange never completes. CPU sampling can miss sufficiently short
+pulses; timing reports the maximum bracketed sample gap. Digital input levels
+do not measure voltage, continuity, or which end of a wire is connected.
+
+The last result is retained only in RAM under `passive_observation` in the
+authenticated diagnostics response. `state:complete` means the report and
+before/after GPIO checks were validated; it does not mean meter communication
+works. Check `full_duration`, `result.stop_code` and `elapsed_us`: ambiguous
+simultaneous CLK/RW transitions can stop the observer early (code 8). Missing
+result counters are `null`, not zero. No event words become measurements and
+no passive capture changes meter freshness, read counters, or BACnet quality.
+
+The queue expires after two seconds if it cannot start. USB execution has an
+eight-second host deadline, bounded 1024-byte lines and at most 4096 event
+records. Disconnect, malformed responses and maintenance interrupt the probe;
+failure is recorded, and the normal abort/drain procedure releases outputs.
+The response's boot ID and observation sequence let clients reject results
+from a restarted gateway or a replacement request. Refresh and download remain
+read-only; only the explicit observation command starts a capture.
+
+## Network time
+
 An NTP client starts after the first allowed Ethernet address. The build's
 `CONFIG_IQ_NTP_SERVER` selects a hostname or numeric IPv4 address; an empty
 string disables synchronization. The default is `time.cloudflare.com`. Use a

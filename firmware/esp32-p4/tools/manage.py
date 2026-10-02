@@ -8,6 +8,20 @@ import time
 from gateway_client import Gateway, image_signature
 
 
+def observe(client):
+    queued = client.request("/api/pico/observe", b"", authenticated=True)
+    deadline = time.monotonic() + 20
+    while time.monotonic() < deadline:
+        snapshot = client.request("/api/diagnostics", b"", authenticated=True)
+        probe = snapshot.get("passive_observation", {})
+        if snapshot.get("boot_id") != queued["boot_id"] or probe.get("sequence") != queued["sequence"]:
+            raise RuntimeError("Gateway restarted or observation replaced; result cannot be attributed to this request")
+        if probe.get("state") in ("complete", "failed"):
+            return probe
+        time.sleep(0.5)
+    raise RuntimeError("Passive observation did not finish before the deadline")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--host", required=True)
@@ -15,7 +29,7 @@ def main():
     parser.add_argument("--token-file", type=Path)
     parser.add_argument("--pin-file", type=Path, required=True)
     sub = parser.add_subparsers(dest="command", required=True)
-    for command in ("pair", "status", "points", "auth-check", "diagnostics", "reboot"):
+    for command in ("pair", "status", "points", "auth-check", "diagnostics", "reboot", "observe"):
         sub.add_parser(command)
     sub.add_parser("configure").add_argument("json_file", type=Path)
     sub.add_parser("update").add_argument("image", type=Path)
@@ -31,6 +45,12 @@ def main():
         print(json.dumps(client.request("/api/points"), indent=2));return
     if args.command == "diagnostics":
         print(json.dumps(client.request("/api/diagnostics", b"", authenticated=True), indent=2));return
+    if args.command == "observe":
+        result = observe(client)
+        print(json.dumps(result, indent=2))
+        if result["state"] != "complete":
+            raise RuntimeError("Passive observation failed: " + result.get("error", "unknown error"))
+        return
     if args.command == "reboot":
         print(json.dumps(client.request("/api/reboot", b"", authenticated=True), indent=2));return
     if args.command == "auth-check":
