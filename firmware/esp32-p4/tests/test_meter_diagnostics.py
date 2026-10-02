@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Read-only hardware/browser acceptance for retained meter diagnostics.
+"""Hardware/browser acceptance for retained meter diagnostics.
 
 Does not enable polling, restart, flash, or initiate meter transactions. Keep
 the output private: it contains raw protocol evidence already retained in RAM.
+With --observe, also runs one input-only 500 ms capture; polling must be off.
 """
 import argparse
 import json
@@ -20,11 +21,15 @@ def main():
     for name in ("host", "expected-mac", "token-file", "pin-file", "output"):
         parser.add_argument("--" + name, required=True)
     parser.add_argument("--require-traces", action="store_true")
+    parser.add_argument("--observe", action="store_true")
     parser.add_argument("--browser-executable", default="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
     args = parser.parse_args()
     os.umask(0o077)
     gateway = Gateway(args.host, args.pin_file, args.token_file, args.expected_mac)
     before = gateway.status()
+    if args.observe:
+        assert not before["config"]["poll_enabled"] and before["pico"]["qualified"]
+        assert gateway.raw("/api/pico/observe", b"")[0] == 401
     code, _, _ = gateway.raw("/api/diagnostics", b"")
     assert code == 401, "Unauthenticated diagnostics were not rejected"
     snapshot = gateway.request("/api/diagnostics", b"", authenticated=True)
@@ -54,6 +59,7 @@ def main():
         page.goto(f"https://{args.host}/", wait_until="networkidle")
         expect(page.locator("#connection")).to_have_text("Connected", timeout=20000)
         expect(page.locator("#refresh-diagnostics")).to_be_disabled()
+        expect(page.locator("#observe-pins")).to_be_disabled()
         page.locator("#key-file").set_input_files(args.token_file)
         expect(page.locator("#auth-state")).to_contain_text("Unlocked", timeout=20000)
         page.locator("[data-view=maintenance]").click()
@@ -62,6 +68,10 @@ def main():
         if args.require_traces:
             expect(page.locator("#meter-traces>details").first).to_be_visible()
             expect(page.locator("#meter-traces")).to_contain_text("Requests clocked:")
+        if args.observe:
+            page.locator("#observe-pins").click()
+            expect(page.locator("#notice")).to_have_text("Passive observation captured. Meter readings remain unvalidated.", timeout=25000)
+            expect(page.locator("#passive-result")).to_contain_text("Sampled CLK rises:")
         page.set_viewport_size({"width":390,"height":844})
         assert page.evaluate("document.documentElement.scrollWidth <= innerWidth"), "Mobile horizontal overflow"
         page.screenshot(path=str(Path(args.output).with_suffix(".mobile.png")), full_page=True)
@@ -71,6 +81,11 @@ def main():
             page.locator("#download").click()
         exported = json.loads(Path(downloaded.value.path()).read_text())
         assert exported["meter_transactions"]["schema"] == 1 and exported["boot_id"] == before["boot_id"]
+        if args.observe:
+            probe = exported["passive_observation"]
+            assert probe["state"] == "complete" and not probe["telemetry_validated"]
+            assert probe["before"]["sio_output_enables"] == probe["after"]["sio_output_enables"] == 0
+            assert exported["meter_transactions"]["total"] == meter["total"]
         assert page.evaluate("localStorage.length === 0 && sessionStorage.length === 0 && document.cookie === ''")
         page.locator("#forget").click()
         expect(page.locator("#refresh-diagnostics")).to_be_disabled()
@@ -81,6 +96,7 @@ def main():
     assert after["config"] == before["config"] and after["boot_id"] == before["boot_id"]
     report = {"passed":True, "configuration_unchanged":True, "boot_unchanged":True,
               "unauthenticated_rejected":True, "browser_refresh_download_and_mobile_layout":True,
+              "passive_capture_tested":args.observe,
               "snapshot":exported}
     Path(args.output).write_text(json.dumps(report, indent=2) + "\n")
     print(json.dumps({key:value for key,value in report.items() if key != "snapshot"}))

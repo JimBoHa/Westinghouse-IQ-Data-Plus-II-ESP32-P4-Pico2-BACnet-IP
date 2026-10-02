@@ -4,6 +4,7 @@
 #include "iq_diagnostics.h"
 #include "iq_pico_update.h"
 #include "iq_uf2.h"
+#include "iq_usb.h"
 #include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -60,8 +61,27 @@ static esp_err_t diagnostics_handler(httpd_req_t *r)
 {
     if(!authorized(r))return ESP_OK;
     if(r->content_len||!iq_security_body(r,"",0))return httpd_resp_send_err(r,HTTPD_400_BAD_REQUEST,"Expected empty authenticated body");
-    return json_reply(r,iq_diagnostics_json());
+    cJSON *j=iq_diagnostics_json();
+#ifndef IQ_RECOVERY_BUILD
+    if(j)cJSON_AddItemToObject(j,"passive_observation",iq_usb_observe_json());
+#endif
+    return json_reply(r,j);
 }
+#ifndef IQ_RECOVERY_BUILD
+static esp_err_t observe_handler(httpd_req_t *r)
+{
+    if(!authorized(r))return ESP_OK;
+    if(r->content_len||!iq_security_body(r,"",0))return httpd_resp_send_err(r,HTTPD_400_BAD_REQUEST,"Expected empty authenticated body");
+    char error[192];uint32_t sequence;
+    if(atomic_load(&updating)||!iq_usb_observe_begin(&sequence,error,sizeof(error))) {
+        httpd_resp_set_status(r,"409 Conflict");
+        return httpd_resp_sendstr(r,atomic_load(&updating)?"Firmware update in progress":error);
+    }
+    cJSON *j=cJSON_CreateObject();cJSON_AddNumberToObject(j,"sequence",sequence);
+    cJSON_AddStringToObject(j,"boot_id",iq_boot_id());cJSON_AddBoolToObject(j,"queued",true);
+    httpd_resp_set_status(r,"202 Accepted");return json_reply(r,j);
+}
+#endif
 static esp_err_t reboot_handler(httpd_req_t *r)
 {
     if(!authorized(r))return ESP_OK;
@@ -276,6 +296,7 @@ void iq_web_start(void)
         {.uri="/api/firmware",.method=HTTP_POST,.handler=ota_handler},
 #ifndef IQ_RECOVERY_BUILD
         {.uri="/api/pico/firmware",.method=HTTP_POST,.handler=pico_handler},
+        {.uri="/api/pico/observe",.method=HTTP_POST,.handler=observe_handler},
 #endif
     };
     for(unsigned i=0;i<sizeof(handlers)/sizeof(handlers[0]);++i)
