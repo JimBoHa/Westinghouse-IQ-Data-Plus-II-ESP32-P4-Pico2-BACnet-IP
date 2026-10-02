@@ -16,3 +16,5 @@ void iq_usb_status(iq_usb_status_t *out);
 void iq_usb_stop(void);
 bool iq_usb_maintenance_begin(char *error,size_t size);
 void iq_usb_maintenance_end(void);
+bool iq_usb_observe_begin(uint32_t *sequence,char *error,size_t size);
+cJSON *iq_usb_observe_json(void);
