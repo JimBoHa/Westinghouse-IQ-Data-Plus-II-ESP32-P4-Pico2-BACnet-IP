@@ -9,6 +9,7 @@ import unittest
 from unittest.mock import patch, MagicMock
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/"tools"))
 from gateway_client import Gateway, auth_headers, image_signature
+from manage import observe
 
 
 class SecurityTests(unittest.TestCase):
@@ -61,6 +62,24 @@ class SecurityTests(unittest.TestCase):
         for index,value in ((1,'/api/firmware'),(2,'b'*32),(3,b'{ }')):
             changed=list(args);changed[index]=value
             self.assertNotEqual(original,auth_headers(*changed)['X-IQ-Auth'])
+
+
+    def test_passive_observation_accepts_queued_http_status(self):
+        client=self.gateway()
+        with patch.object(client,'raw',return_value=(202,b'{"queued":true}',"a"*64)):
+            self.assertEqual(client.request('/api/pico/observe',b''),{'queued':True})
+            with self.assertRaises(RuntimeError):client.request('/api/firmware',b'')
+
+    def test_passive_observation_binds_boot_and_sequence(self):
+        queued={'boot_id':'one','sequence':3}
+        result={'state':'complete','sequence':3}
+        client=MagicMock()
+        client.request.side_effect=[queued,{'boot_id':'one','passive_observation':result}]
+        self.assertEqual(observe(client),result)
+        client.request.assert_any_call('/api/pico/observe',b'',authenticated=True)
+        for boot,sequence in (('two',3),('one',4)):
+            client.request.side_effect=[queued,{'boot_id':boot,'passive_observation':{'sequence':sequence}}]
+            with self.assertRaisesRegex(RuntimeError,'restarted or observation replaced'):observe(client)
 
 
 if __name__=='__main__':unittest.main()

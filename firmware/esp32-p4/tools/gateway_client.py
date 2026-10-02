@@ -110,7 +110,7 @@ class Gateway:
             challenge = self.request("/api/auth/challenge")
             headers.update(auth_headers(self.key, path, challenge["nonce"], body))
         code, data, _ = self.raw(path, body, headers, timeout=timeout)
-        if code != 200:
+        if code != 200 and not (code == 202 and path == "/api/pico/observe"):
             raise RuntimeError(f"Gateway HTTP {code}: {data[:512].decode(errors='replace')}")
         return json.loads(data)
 
