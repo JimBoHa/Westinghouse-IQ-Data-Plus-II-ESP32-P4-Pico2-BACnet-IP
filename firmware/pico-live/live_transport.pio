@@ -23,6 +23,21 @@ cancelled:
     irq 4
     jmp park
 
+; Read-only PIO2 probe. Each taken high-loop iteration is two clk_sys cycles.
+; This is a quantized pulse-width diagnostic, not a protocol validator. FIFO
+; overflow is reported separately; a full FIFO never blocks the live bus.
+.program live_clock_probe
+pulse:
+    wait 1 gpio 0
+    mov x, ~null
+high:
+    jmp pin decrement
+    mov isr, x
+    push noblock
+    jmp pulse
+decrement:
+    jmp x-- high
+
 .program live_read_falling
 .side_set 1 opt pindirs
     pull block          side 1

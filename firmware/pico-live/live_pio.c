@@ -14,9 +14,9 @@
 #define DATA (1u << PIN_DATA)
 #define INT (1u << PIN_INT)
 #define DRIVE (DATA | INT)
-enum { READER=0, INT_CLEAR=2, GUARD=3, WRITER=0 };
+enum { READER=0, INT_CLEAR=2, GUARD=3, WRITER=0, CLOCK_PROBE=0 };
 static bool claimed, programs_loaded;
-static uint guard_offset, read_offset, int_clear_offset, write_offset;
+static uint guard_offset, read_offset, int_clear_offset, write_offset, probe_offset;
 static const pio_program_t *read_program;
 static pio_sm_config read_config, write_config;
 
@@ -36,6 +36,7 @@ void live_pio_release(void) {
     if (claimed) {
         pio_set_sm_mask_enabled(pio0,(1u<<READER)|(1u<<INT_CLEAR)|(1u<<GUARD),false);
         pio_sm_set_enabled(pio1,WRITER,false);
+        pio_sm_set_enabled(pio2,CLOCK_PROBE,false);
     }
     sio_hw->gpio_oe_clr=DRIVE;
 }
@@ -58,6 +59,7 @@ static void init_transport(bool falling) {
         pio_sm_claim(pio0,INT_CLEAR);
         pio_sm_claim(pio0,GUARD);
         pio_sm_claim(pio1,WRITER);
+        pio_sm_claim(pio2,CLOCK_PROBE);
         claimed=true;
     }
     if (programs_loaded) {
@@ -65,12 +67,14 @@ static void init_transport(bool falling) {
         pio_remove_program(pio0,&live_rw_guard_program,guard_offset);
         pio_remove_program(pio0,&live_int_clear_program,int_clear_offset);
         pio_remove_program(pio1,&live_write_capture_program,write_offset);
+        pio_remove_program(pio2,&live_clock_probe_program,probe_offset);
     }
     read_program=falling?&live_read_falling_program:&live_read_rising_program;
     guard_offset=pio_add_program(pio0,&live_rw_guard_program);
     read_offset=pio_add_program(pio0,read_program);
     int_clear_offset=pio_add_program(pio0,&live_int_clear_program);
     write_offset=pio_add_program(pio1,&live_write_capture_program);
+    probe_offset=pio_add_program(pio2,&live_clock_probe_program);
     programs_loaded=true;
 
     read_config=falling?live_read_falling_program_get_default_config(read_offset):
@@ -101,6 +105,12 @@ static void init_transport(bool falling) {
     sm_config_set_out_shift(&write_config,true,false,32);
     sm_config_set_clkdiv(&write_config,1.0f);
     pio_sm_init(pio1,WRITER,write_offset,&write_config);
+    pio_sm_config probe_config=live_clock_probe_program_get_default_config(probe_offset);
+    sm_config_set_jmp_pin(&probe_config,PIN_CLK);
+    sm_config_set_fifo_join(&probe_config,PIO_FIFO_JOIN_RX);
+    sm_config_set_clkdiv(&probe_config,1.0f);
+    pio_sm_init(pio2,CLOCK_PROBE,probe_offset,&probe_config);
+    pio2->fdebug=0xffffffffu;
     pio0->irq=0xffu;
     pio1->irq=0xffu;
     pio_sm_set_pins_with_mask(pio0,READER,0,DRIVE);
@@ -142,6 +152,19 @@ static void release_guard(void) {
     pio_sm_put(pio0,GUARD,1);
 }
 
+static void collect_clock_probe(uint32_t *diagnostics) {
+    while(!pio_sm_is_rx_fifo_empty(pio2,CLOCK_PROBE)) {
+        uint32_t loops=~pio_sm_get(pio2,CLOCK_PROBE);
+        if(!diagnostics[IQ_PIO_PROBE_PULSES]) {
+            diagnostics[IQ_PIO_PROBE_FIRST_HIGH]=loops;
+            diagnostics[IQ_PIO_PROBE_MIN_HIGH]=loops;
+        }
+        if(loops<diagnostics[IQ_PIO_PROBE_MIN_HIGH])diagnostics[IQ_PIO_PROBE_MIN_HIGH]=loops;
+        if(loops>diagnostics[IQ_PIO_PROBE_MAX_HIGH])diagnostics[IQ_PIO_PROBE_MAX_HIGH]=loops;
+        ++diagnostics[IQ_PIO_PROBE_PULSES];
+    }
+}
+
 void live_pio_run(live_config_t c) {
     memset(&live_result,0,sizeof live_result);
     live_result.sys_hz=clock_get_hz(clk_sys);
@@ -177,6 +200,7 @@ void live_pio_run(live_config_t c) {
             if (!started) live_result.stop=STOP_AMBIGUOUS;
             break;
         }
+        collect_clock_probe(diagnostics);
         uint32_t changed=pins^before;
         if((changed&CLK)&&(pins&CLK))++diagnostics[IQ_PIO_CPU_CLOCK_RISES];
         if(changed&RW)++diagnostics[(pins&RW)?IQ_PIO_CPU_RW_RISES:IQ_PIO_CPU_RW_FALLS];
@@ -317,6 +341,7 @@ void live_pio_run(live_config_t c) {
                 diagnostics[IQ_PIO_REQUEST_US]=elapsed;
                 diagnostics[IQ_PIO_REQUEST_PINS]=sio_hw->gpio_in&15u;
                 diagnostics[IQ_PIO_REQUEST_PADOE]=pio0->dbg_padoe&15u;
+                pio_sm_set_enabled(pio2,CLOCK_PROBE,true);
             }
             pio_sm_set_enabled(pio0,READER,true);
             if (!record(elapsed,origin==LIVE_PIO_ORIGIN_REQUEST?EV_REQUEST:EV_COMPLETE,reader_shifts,image,origin)) break;
@@ -360,6 +385,8 @@ void live_pio_run(live_config_t c) {
      * released and every transport SM has stopped. No injected instruction
      * is allowed to act on the live interface. Reader never uses its RX FIFO. */
     live_pio_release();
+    collect_clock_probe(diagnostics);
+    diagnostics[IQ_PIO_PROBE_OVERFLOW]=(pio2->fdebug&(1u<<CLOCK_PROBE))?1u:0u;
     pio_sm_exec(pio0,READER,pio_encode_mov(pio_isr,pio_x));
     pio_sm_exec(pio0,READER,pio_encode_push(false,false));
     diagnostics[IQ_PIO_READER_X]=pio_sm_get(pio0,READER);
