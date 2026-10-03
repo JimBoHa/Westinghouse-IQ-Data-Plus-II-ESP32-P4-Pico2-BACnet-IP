@@ -1,6 +1,6 @@
 # Source provenance
 
-The meter decoding, diagnostics and transport rules are ported from [Westinghouse-IQ-Data-Plus-II-to-BACnet-IP](https://github.com/JimBoHa/Westinghouse-IQ-Data-Plus-II-to-BACnet-IP) at `1add86003bddecb69c1c7ac28c5efd70751febff`. Original source and Git history are retained. The plain Pico 2 build uses the existing 0.4.7 source without timing/PIO changes.
+The meter decoding, diagnostics and transport rules are ported from [Westinghouse-IQ-Data-Plus-II-to-BACnet-IP](https://github.com/JimBoHa/Westinghouse-IQ-Data-Plus-II-to-BACnet-IP) at `1add86003bddecb69c1c7ac28c5efd70751febff`. Original Git history is retained. The initial plain Pico 2 build used the existing 0.4.7 source without timing/PIO changes. The local 0.4.8 update adds active PIO diagnostics and CLK qualification before advancing DATA or clearing INT. The retained Pico 2 W binary in `firmware/pico-live/dist` is the original 0.4.7 artifact, not the new source build.
 
 The BACnet integration structure, UDP transport and compatibility headers were adapted from [ESP32-P4-Modbus-IP-to-BACnet-IP-Protocol-Converter](https://github.com/JimBoHa/ESP32-P4-Modbus-IP-to-BACnet-IP-Protocol-Converter) at `0729b7b96d0da99bfce14fd174cd39c21537ea2e`. Its 0BSD SPDX notices and MIT compatibility-header notices are retained. No production configuration, signing keys or production binaries were copied. The Modbus/ATS polling and its 128-point map are not part of this port.
 
