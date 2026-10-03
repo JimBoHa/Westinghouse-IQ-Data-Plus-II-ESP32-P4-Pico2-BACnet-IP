@@ -135,6 +135,8 @@ cJSON *iq_status_json(void)
     xSemaphoreGive(state_lock);
     cJSON *eth=cJSON_AddObjectToObject(j,"ethernet");char address[16];
     esp_ip4addr_ntoa(&ip.ip,address,sizeof(address));cJSON_AddStringToObject(eth,"ip",address);
+    esp_ip4addr_ntoa(&ip.netmask,address,sizeof(address));cJSON_AddStringToObject(eth,"netmask",address);
+    esp_ip4addr_ntoa(&ip.gw,address,sizeof(address));cJSON_AddStringToObject(eth,"gateway",address);
     cJSON_AddBoolToObject(eth,"link_up",link);cJSON_AddBoolToObject(eth,"ready",ready);
     cJSON_AddBoolToObject(eth,"protected_address_blocked",blocked);
     iq_usb_status_t us;iq_usb_status(&us);
@@ -153,6 +155,7 @@ cJSON *iq_status_json(void)
     cJSON_AddNumberToObject(bac,"fault_points",bs.fault_points);cJSON_AddNumberToObject(bac,"received_packets",bs.received_packets);
     cJSON_AddNumberToObject(bac,"cov_pending",bs.cov_pending);cJSON_AddNumberToObject(bac,"cov_timeouts",bs.cov_timeouts);
     cJSON_AddNumberToObject(bac,"heartbeat_age_seconds",(now_ms()-heartbeat)/1000.0);
+    cJSON_AddItemToObject(bac,"discovery",gateway_bacnet_discovery_json(&bs));
     cJSON_AddStringToObject(bac,"instance_status",bs.instance_conflicts?"conflict":(bs.instance_check_complete?"checked":"checking"));
     cJSON_AddNumberToObject(bac,"instance_checks",bs.instance_checks);cJSON_AddNumberToObject(bac,"instance_conflicts",bs.instance_conflicts);
     if(bs.instance_conflicts) {
