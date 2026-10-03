@@ -44,6 +44,10 @@ add_test(NAME port_parity COMMAND ${Python3_EXECUTABLE}
 
 add_test(NAME secure_client COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/test_secure_client.py -v)
 
+add_executable(test_https_redirect test_https_redirect.c ${PORT}/main/iq_https_redirect.c)
+target_link_libraries(test_https_redirect PRIVATE iqcore)
+add_test(NAME https_redirect COMMAND test_https_redirect)
+
 add_executable(test_diagnostics test_diagnostics.c)
 target_link_libraries(test_diagnostics PRIVATE iqcore)
 add_test(NAME diagnostic_ring COMMAND test_diagnostics)
