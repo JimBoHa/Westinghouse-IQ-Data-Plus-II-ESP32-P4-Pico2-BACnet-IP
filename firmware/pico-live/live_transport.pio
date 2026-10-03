@@ -6,9 +6,9 @@
     pull block          side 1
     out pindirs, 1      side 1
     mov x, y
-    nop                 side 0
+    irq clear 5         side 0
 bitloop:
-    wait 1 gpio 0
+    wait 1 irq 5
     jmp pin shift
     jmp cancelled
 shift:
@@ -43,9 +43,9 @@ decrement:
     pull block          side 1
     out pindirs, 1      side 1
     mov x, y
-    nop                 side 0
+    irq clear 5         side 0
 bitloop:
-    wait 1 gpio 0
+    wait 1 irq 5
     nop                 side 1
     wait 0 gpio 0
     jmp pin shift
@@ -81,16 +81,21 @@ public held:
     irq 3
     jmp armed
 
-; SM2 in PIO0 independently clears INT on read OR write clocks. While CLK is
-; HIGH, every instruction asserts its inactive-low direction, taking priority
-; over the reader's INT writes. This also handles direct writes after completion.
+; SM2 qualifies CLK before either clearing INT or advancing reader DATA. The
+; second sample eight cycles after WAIT rejects the short spikes measured on
+; the live interface. At 150 MHz this is 53 ns; normal CLK HIGH is about 1 us.
+; IRQ5 is consumed by the reader's WAIT. Clearing it when presenting an image
+; prevents earlier clocks from advancing that image. INT remains inactive-low
+; throughout a qualified HIGH, including direct writes after completion.
 .program live_int_clear
 .side_set 1 opt pindirs
 low:
-    wait 1 gpio 0
+    wait 1 gpio 0 [7]
+    jmp pin high
+    jmp low
 high:
-    jmp pin high        side 1
-    jmp low             side 1
+    irq 5               side 1
+    wait 0 gpio 0       side 1
 
 ; PIO1, 31 instructions. IN_BASE=GP0; JMP_PIN=GP1. MOV captures CLK/RW/DATA
 ; together. X is remaining capacity (25..0); a 26th edge sets overflow IRQ5.
