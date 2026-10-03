@@ -1,6 +1,6 @@
 # IQ Data Plus II on ESP32-P4 and plain Pico 2
 
-Development port derived from the original Raspberry Pi gateway. Source for the Raspberry Pi remains unchanged. This target runs C on ESP-IDF 5.5.5, hosts the existing Pico USB protocol, and exposes the original 198 BACnet points. See `ATTRIBUTION.md` for dependency and source provenance. Physical meter qualification is separate from the firmware and network tests.
+Development port derived from the original Raspberry Pi gateway. The Linux gateway remains available as a reference. This target runs C on ESP-IDF 5.5.5, hosts the Pico USB protocol, and exposes the original 198 BACnet points. See `ATTRIBUTION.md` for dependency and source provenance. Physical meter qualification is separate from the firmware and network tests.
 
 See [validation status](VALIDATION.md) for the tests actually completed and the remaining meter qualification.
 
@@ -32,9 +32,15 @@ For plain Pico 2, set `PICO_SDK_PATH` to SDK 2.3.1 and `PICO_TOOLCHAIN_PATH` to 
 ```sh
 cmake -S firmware/pico-live -B build/pico2 -G Ninja -DPICO_BOARD=pico2 -DCMAKE_BUILD_TYPE=Release
 cmake --build build/pico2
+python3 firmware/pico-live/test_clock_filter.py build/pico2/live_transport.pio.h
 ```
 
-Artifact: `build/pico2/iqdata_pico_live.uf2`, firmware 0.4.7, RP2350 ARM Secure image type. “ARM Secure” is the normal RP2350 execution state, not provisioning secure boot or OTP keys. Do not use the original Pico 2 W artifact for this target.
+Artifact: `build/pico2/iqdata_pico_live.uf2`, firmware 0.4.8, RP2350 ARM Secure image type. “ARM Secure” is the normal RP2350 execution state, not provisioning secure boot or OTP keys. Do not use the original Pico 2 W artifact for this target.
+
+Pico 0.4.8 qualifies CLK before advancing request DATA or clearing INT. Short
+CLK spikes previously consumed the first request bit and stalled reads. P4
+0.4.4 accepts the new firmware and exposes bounded active PIO diagnostics;
+see [diagnostic details](docs/DIAGNOSTICS.md#active-pio-snapshots).
 
 ## Wiring and power
 
@@ -72,7 +78,7 @@ For four gateways, reserve distinct instances such as **75201–75204**, names `
 
 Management uses pinned HTTPS with one-use HMAC authentication. Pair the device and supply `--pin-file` to all client commands; see [security and signed updates](docs/SECURITY.md). Firmware uploads require an adjacent signed `.sig.json` manifest and the complete file's SHA-256. The P4 updater checks target chip/project and image integrity before changing boot selection. The new image must pass five consecutive one-second local health checks after a ten-second grace period. An independent 60-second reset deadline returns a stalled pending image to bootloader rollback. Management writes are blocked until validation passes. Status exposes the acceptance state and sample count. Meter/Ethernet availability is not required for the local startup self-check.
 
-Pico uploads are buffered in bounded RAM, hash checked, and restricted to contiguous plain-Pico-2 IQData 0.4.7 UF2 images. The P4 quiesces polling, aborts/drains output, uses the SDK reset interface to enter BOOTSEL, verifies RP2350 USB/volume identity, and copies the UF2 to the ROM volume. Pico remains powered. Success requires the expected firmware/board identity to reappear over CDC. The optional picotool absolute-family compatibility block is omitted; only RP2350 ARM application blocks are sent. This is not a Pico A/B rollback mechanism. An interrupted or nonbooting Pico application may require BOOTSEL recovery if it cannot expose its reset interface.
+Pico uploads are buffered in bounded RAM, hash checked, and restricted to contiguous plain-Pico-2 IQData 0.4.7/0.4.8 UF2 images. The P4 quiesces polling, aborts/drains output, uses the SDK reset interface to enter BOOTSEL, verifies RP2350 USB/volume identity, and copies the UF2 to the ROM volume. Pico remains powered. Success requires the uploaded version and expected board identity to reappear over CDC. The optional picotool absolute-family compatibility block is omitted; only RP2350 ARM application blocks are sent. This is not a Pico A/B rollback mechanism. An interrupted or nonbooting Pico application may require BOOTSEL recovery if it cannot expose its reset interface.
 
 An optional Ethernet-only recovery application can be built with `-B build/p4-recovery -DIQ_RECOVERY_BUILD=ON`. It requires already-provisioned NVS and retains management access while BACnet and meter polling are unavailable. It is intended as a recovery step before restoring the full application.
 

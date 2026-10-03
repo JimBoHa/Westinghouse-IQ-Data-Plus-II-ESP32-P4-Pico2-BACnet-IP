@@ -92,6 +92,7 @@ jobs:
         run: |
           cmake -S firmware/pico-live -B build/pico2 -G Ninja -DPICO_BOARD=pico2 -DCMAKE_BUILD_TYPE=Release -DPICOTOOL_GIT_BRANCH=2041936441b48a3cc53ae3da9e805229fe8f4e18
           cmake --build build/pico2 --parallel 2
+          python3 firmware/pico-live/test_clock_filter.py build/pico2/live_transport.pio.h
           python3 firmware/esp32-p4/tools/record_build.py pico2 build/pico2
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
