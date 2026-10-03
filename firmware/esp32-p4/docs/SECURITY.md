@@ -8,6 +8,15 @@ silently replaced. The release verification public key is compiled into the
 application. No private release key or device TLS key is included in Git or a
 release artifact.
 
+Firmware 0.4.5 redirects an HTTP IP-address visit to HTTPS on the device's
+current IP. A visit using its own `.local` hostname keeps that hostname. The
+redirect is temporary with `Cache-Control: no-store`; an arbitrary Host header
+cannot select an external destination. This avoids requiring mDNS resolution
+for clients that reached the gateway by IP, including routed networks.
+If a browser cached an older permanent `.local` redirect, enter the explicit
+`https://<gateway-IP>/` URL. Browser certificate verification is still required;
+the device certificate and pinned management identity are unchanged.
+
 ## Pair and pin the device
 
 The initial transition from 0.2.x uses its existing authenticated HTTP updater

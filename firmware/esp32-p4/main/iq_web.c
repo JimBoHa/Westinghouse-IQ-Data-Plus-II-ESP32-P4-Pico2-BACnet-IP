@@ -5,6 +5,7 @@
 #include "iq_pico_update.h"
 #include "iq_uf2.h"
 #include "iq_usb.h"
+#include "iq_https_redirect.h"
 #include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -93,9 +94,16 @@ static esp_err_t reboot_handler(httpd_req_t *r)
 }
 static esp_err_t redirect_handler(httpd_req_t *r)
 {
-    cJSON *status=iq_status_json();const cJSON *host=cJSON_GetObjectItemCaseSensitive(status,"hostname");
-    char location[96];snprintf(location,sizeof(location),"https://%s.local/",cJSON_IsString(host)?host->valuestring:"iqdata");
-    cJSON_Delete(status);httpd_resp_set_status(r,"308 Permanent Redirect");
+    char host[96]={0},location[96];
+    if(httpd_req_get_hdr_value_str(r,"Host",host,sizeof(host))!=ESP_OK)host[0]=0;
+    cJSON *status=iq_status_json();
+    bool located=iq_https_location(status,host,location,sizeof(location));
+    cJSON_Delete(status);httpd_resp_set_hdr(r,"Cache-Control","no-store");
+    if(!located) {
+        httpd_resp_set_status(r,"503 Service Unavailable");
+        return httpd_resp_sendstr(r,"Gateway HTTPS address unavailable");
+    }
+    httpd_resp_set_status(r,"307 Temporary Redirect");
     httpd_resp_set_hdr(r,"Location",location);return httpd_resp_sendstr(r,"Use HTTPS management");
 }
 static esp_err_t status_handler(httpd_req_t *r) { return json_reply(r,iq_status_json()); }
