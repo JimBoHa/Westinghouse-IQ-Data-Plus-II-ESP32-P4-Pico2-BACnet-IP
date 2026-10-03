@@ -18,6 +18,7 @@
 #include "bacnet/iam.h"
 #include "bacnet/npdu.h"
 #include "bacnet/whohas.h"
+#include "bacnet/whois.h"
 #include "bacnet/basic/binding/address.h"
 #include "bacnet/basic/object/ai.h"
 #include "bacnet/basic/object/bi.h"
@@ -214,11 +215,69 @@ static void observe_i_am(uint8_t *data,uint16_t length,BACNET_ADDRESS *source)
     iq_event("bacnet","duplicate_instance",1,"Another BACnet address advertised this Device instance; identity remains fixed");
 }
 
+static void increment(uint32_t *value) { if(*value<UINT32_MAX)++*value; }
+
+static gateway_bacnet_discovery_peer_t *discovery_peer(const BACNET_ADDRESS *source)
+{
+    if(!source||source->mac_len!=6||source->len>6)return NULL;
+    uint32_t ip;memcpy(&ip,source->mac,4);
+    gateway_bacnet_discovery_peer_t *oldest=&stats.discovery_peers[0];
+    for(unsigned i=0;i<GATEWAY_BACNET_DISCOVERY_PEERS;++i) {
+        gateway_bacnet_discovery_peer_t *peer=&stats.discovery_peers[i];
+        if(peer->used&&peer->ip==ip&&peer->network==source->net&&peer->address_len==source->len&&
+           !memcmp(peer->address,source->adr,source->len)) {
+            peer->port=((uint16_t)source->mac[4]<<8)|source->mac[5];peer->last_seen_ms=now_ms;
+            return peer;
+        }
+        if(!peer->used||(oldest->used&&peer->last_seen_ms<oldest->last_seen_ms))oldest=peer;
+    }
+    *oldest=(gateway_bacnet_discovery_peer_t){.used=true,.ip=ip,.network=source->net,
+        .port=((uint16_t)source->mac[4]<<8)|source->mac[5],.address_len=source->len,
+        .last_seen_ms=now_ms,.low_limit=-1,.high_limit=-1};
+    memcpy(oldest->address,source->adr,source->len);return oldest;
+}
+
 static void who_is(uint8_t *data, uint16_t length, BACNET_ADDRESS *source)
 {
     if (!stats.link_up) { return; }
-    if (bip_port_last_receive_was_broadcast()) { handler_who_is(data, length, source); }
-    else { handler_who_is_unicast(data, length, source); }
+    increment(&stats.who_is_received);
+    gateway_bacnet_discovery_peer_t *peer=discovery_peer(source);
+    int32_t low=-1,high=-1;
+    int decoded=whois_decode_service_request(data,length,&low,&high);
+    bool valid=decoded==(int)length&&((low==-1&&high==-1)||(low>=0&&high>=low));
+    if(peer) {
+        increment(&peer->requests);peer->last_who_is_ms=now_ms;
+        peer->bvlc_function=bip_port_last_receive_function();peer->range_valid=valid;
+        peer->low_limit=low;peer->high_limit=high;peer->result=0;
+    }
+    if(!valid||!peer) { increment(&stats.who_is_invalid);return; }
+    if(low>=0&&(config.device_instance<(uint32_t)low||config.device_instance>(uint32_t)high)) {
+        increment(&stats.who_is_excluded);peer->result=1;return;
+    }
+    /* ASHRAE 135-2008q-1 permits a unicast I-Am for every Who-Is form.
+       Return to the original source IP/port and preserve SNET/SADR routing.
+       Broadcasting here loses routed, forwarded and non-default-port clients. */
+    BACNET_ADDRESS destination;BACNET_NPDU_DATA npdu;
+    int size=iam_unicast_encode_pdu(transmit_buffer,source,&destination,&npdu);
+    int sent=size>0?bip_send_pdu(&destination,&npdu,transmit_buffer,(unsigned)size):-1;
+    if(sent>0) { increment(&stats.i_am_sent);increment(&peer->replies);peer->result=2; }
+    else { increment(&stats.i_am_failed);increment(&peer->failures);peer->result=3; }
+}
+
+static void track_read(const BACNET_ADDRESS *source,uint8_t service)
+{
+    gateway_bacnet_discovery_peer_t *peer=discovery_peer(source);
+    if(peer) { increment(&peer->reads);peer->last_read_ms=now_ms;peer->last_read_service=service; }
+}
+static void read_property(uint8_t *data,uint16_t length,BACNET_ADDRESS *source,
+                          BACNET_CONFIRMED_SERVICE_DATA *service)
+{
+    track_read(source,SERVICE_CONFIRMED_READ_PROPERTY);handler_read_property(data,length,source,service);
+}
+static void read_property_multiple(uint8_t *data,uint16_t length,BACNET_ADDRESS *source,
+                                   BACNET_CONFIRMED_SERVICE_DATA *service)
+{
+    track_read(source,SERVICE_CONFIRMED_READ_PROP_MULTIPLE);handler_read_property_multiple(data,length,source,service);
 }
 
 static void who_has(uint8_t *request, uint16_t length, BACNET_ADDRESS *source)
@@ -384,8 +443,8 @@ bool gateway_bacnet_init(const gateway_bacnet_config_t *input, uint64_t timestam
     apdu_set_unconfirmed_handler(SERVICE_UNCONFIRMED_WHO_IS, who_is);
     apdu_set_unconfirmed_handler(SERVICE_UNCONFIRMED_WHO_HAS, who_has);
     apdu_set_unconfirmed_handler(SERVICE_UNCONFIRMED_I_AM, observe_i_am);
-    apdu_set_confirmed_handler(SERVICE_CONFIRMED_READ_PROPERTY, handler_read_property);
-    apdu_set_confirmed_handler(SERVICE_CONFIRMED_READ_PROP_MULTIPLE, handler_read_property_multiple);
+    apdu_set_confirmed_handler(SERVICE_CONFIRMED_READ_PROPERTY, read_property);
+    apdu_set_confirmed_handler(SERVICE_CONFIRMED_READ_PROP_MULTIPLE, read_property_multiple);
     apdu_set_confirmed_handler(SERVICE_CONFIRMED_WRITE_PROPERTY, handler_write_property);
     apdu_set_confirmed_handler(SERVICE_CONFIRMED_WRITE_PROP_MULTIPLE, handler_write_property_multiple);
     apdu_set_confirmed_handler(SERVICE_CONFIRMED_SUBSCRIBE_COV, handler_cov_subscribe);
@@ -498,6 +557,50 @@ bool gateway_bacnet_network_update(uint32_t ip, uint32_t mask, uint32_t gateway,
 }
 
 void gateway_bacnet_stats(gateway_bacnet_stats_t *out) { if (out) { *out = stats; } }
+cJSON *gateway_bacnet_discovery_json(const gateway_bacnet_stats_t *state)
+{
+    if(!state)return NULL;
+    cJSON *json=cJSON_CreateObject();if(!json)return NULL;
+    cJSON_AddStringToObject(json,"response_mode","unicast-to-requester");
+    cJSON_AddNumberToObject(json,"who_is_received",state->who_is_received);
+    cJSON_AddNumberToObject(json,"invalid_requests",state->who_is_invalid);
+    cJSON_AddNumberToObject(json,"excluded_by_range",state->who_is_excluded);
+    cJSON_AddNumberToObject(json,"i_am_sent",state->i_am_sent);
+    cJSON_AddNumberToObject(json,"send_failures",state->i_am_failed);
+    cJSON_AddNumberToObject(json,"peer_capacity",GATEWAY_BACNET_DISCOVERY_PEERS);
+    cJSON *peers=cJSON_AddArrayToObject(json,"peers");
+    if(!peers) { cJSON_Delete(json);return NULL; }
+    static const char *results[]={"invalid-request","excluded-by-range","sent","send-failed"};
+    for(unsigned i=0;i<GATEWAY_BACNET_DISCOVERY_PEERS;++i) {
+        const gateway_bacnet_discovery_peer_t *peer=&state->discovery_peers[i];
+        if(!peer->used)continue;
+        cJSON *item=cJSON_CreateObject();if(!item) { cJSON_Delete(json);return NULL; }
+        cJSON_AddItemToArray(peers,item);uint8_t ip[4];memcpy(ip,&peer->ip,4);char text[16];
+        snprintf(text,sizeof(text),"%u.%u.%u.%u",ip[0],ip[1],ip[2],ip[3]);
+        cJSON_AddStringToObject(item,"ip",text);cJSON_AddNumberToObject(item,"port",peer->port);
+        cJSON_AddNumberToObject(item,"source_network",peer->network);
+        char route[13];for(unsigned b=0;b<peer->address_len;++b)snprintf(route+2*b,3,"%02x",peer->address[b]);
+        route[2*peer->address_len]=0;cJSON_AddStringToObject(item,"source_address",route);
+        cJSON_AddNumberToObject(item,"who_is_requests",peer->requests);
+        cJSON_AddNumberToObject(item,"i_am_sent",peer->replies);cJSON_AddNumberToObject(item,"send_failures",peer->failures);
+        cJSON_AddNumberToObject(item,"last_seen_uptime_ms",peer->last_seen_ms);
+        if(peer->requests) {
+            cJSON_AddNumberToObject(item,"last_who_is_uptime_ms",peer->last_who_is_ms);
+            cJSON_AddNumberToObject(item,"bvlc_function",peer->bvlc_function);
+            cJSON_AddBoolToObject(item,"range_valid",peer->range_valid);
+            if(peer->range_valid&&peer->low_limit>=0) {
+                cJSON_AddNumberToObject(item,"low_limit",peer->low_limit);cJSON_AddNumberToObject(item,"high_limit",peer->high_limit);
+            } else { cJSON_AddNullToObject(item,"low_limit");cJSON_AddNullToObject(item,"high_limit"); }
+            cJSON_AddStringToObject(item,"last_result",results[peer->result<4?peer->result:0]);
+        }
+        cJSON_AddNumberToObject(item,"read_requests",peer->reads);
+        if(peer->reads) {
+            cJSON_AddNumberToObject(item,"last_read_uptime_ms",peer->last_read_ms);
+            cJSON_AddNumberToObject(item,"last_read_service",peer->last_read_service);
+        }
+    }
+    return json;
+}
 void gateway_bacnet_shutdown(void)
 {
     bip_cleanup();
