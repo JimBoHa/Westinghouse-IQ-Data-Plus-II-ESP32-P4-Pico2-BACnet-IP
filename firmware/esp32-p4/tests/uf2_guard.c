@@ -16,6 +16,14 @@ int main(int argc,char **argv)
     static const char metadata[]="iqdata-pico-live\0000.4.7\000pico2";
     memcpy(b+32,metadata,sizeof(metadata));
     assert(iq_uf2_validate(b,sizeof(b),&skip,error,sizeof(error))&&skip==0);
+    char version[16];size_t version_offset=32+sizeof("iqdata-pico-live");
+    assert(iq_uf2_validate_version(b,sizeof(b),&skip,version,error,sizeof(error))&&!strcmp(version,"0.4.7"));
+    b[version_offset+4]='8';
+    assert(iq_uf2_validate_version(b,sizeof(b),&skip,version,error,sizeof(error))&&!strcmp(version,"0.4.8"));
+    b[version_offset+4]='9';assert(!iq_uf2_validate(b,sizeof(b),&skip,error,sizeof(error)));
+    b[version_offset+4]='8';memcpy(b+200,"0.4.7",6);
+    assert(!iq_uf2_validate(b,sizeof(b),&skip,error,sizeof(error))); /* Ambiguous metadata. */
+    memset(b+200,0,6);b[version_offset+4]='7';
     for(unsigned offset=0;offset<32;offset+=4) {
         b[512+offset]^=1;assert(!iq_uf2_validate(b,sizeof(b),&skip,error,sizeof(error)));b[512+offset]^=1;
     }

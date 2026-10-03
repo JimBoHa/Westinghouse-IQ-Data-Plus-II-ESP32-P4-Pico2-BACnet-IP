@@ -1,5 +1,6 @@
 #pragma once
 #include "iq_model.h"
+#include "../../common/pio_diagnostics.h"
 #define IQ_LINE_CAPACITY 1024
 #define IQ_TRACE_EVENT_CAPACITY 64
 typedef enum {
@@ -29,6 +30,7 @@ typedef struct {
 extern const char *const iq_result_names[IQ_RESULT_COUNT];
 extern const char *const iq_check_names[IQ_CHECK_COUNT];
 extern const char *const iq_trace_names[IQ_TRACE_COUNT];
+extern const char *const iq_pio_diagnostic_names[IQ_PIO_DIAGNOSTIC_COUNT];
 typedef struct {
     iq_kind_t kind;
     uint16_t address;
@@ -48,6 +50,7 @@ typedef struct {
     int8_t released;
     bool timing_pio;
     uint32_t clock_hz;
+    uint32_t pio_diagnostics[IQ_PIO_DIAGNOSTIC_COUNT],pio_diagnostics_present;
     iq_trace_event_t trace[IQ_TRACE_EVENT_CAPACITY];
 } iq_stream_t;
 

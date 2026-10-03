@@ -13,7 +13,8 @@ static bool contains(const uint8_t *data,size_t size,const char *text)
     for(size_t i=0;i+n<=size;++i)if(!memcmp(data+i,text,n))return true;
     return false;
 }
-bool iq_uf2_validate(const uint8_t *data,size_t length,size_t *skip,char *error,size_t size)
+bool iq_uf2_validate_version(const uint8_t *data,size_t length,size_t *skip,
+    char version[16],char *error,size_t size)
 {
     if(!data||length<1024||length>IQ_UF2_MAX_BYTES||length%512)
         return bad(error,size,"UF2 must contain complete 512-byte blocks, up to 1 MiB");
@@ -35,8 +36,12 @@ bool iq_uf2_validate(const uint8_t *data,size_t length,size_t *skip,char *error,
            u32(b+20)!=i||u32(b+24)!=blocks||u32(b+28)!=0xe48bff59) { ok=false;break; }
         memcpy(image+i*256,b+32,256);
     }
-    if(ok)ok=contains(image,blocks*256,"iqdata-pico-live")&&contains(image,blocks*256,"0.4.7")&&contains(image,blocks*256,"pico2");
+    bool old=ok&&contains(image,blocks*256,"0.4.7"),current=ok&&contains(image,blocks*256,"0.4.8");
+    if(ok)ok=contains(image,blocks*256,"iqdata-pico-live")&&(old!=current)&&contains(image,blocks*256,"pico2");
+    if(ok&&version)snprintf(version,16,"%s",current?"0.4.8":"0.4.7");
     free(image);
-    if(!ok)return bad(error,size,"Require complete contiguous iqdata-pico-live 0.4.7, plain pico2, RP2350 ARM Secure UF2");
+    if(!ok)return bad(error,size,"Require complete contiguous iqdata-pico-live 0.4.7/0.4.8, plain pico2, RP2350 ARM Secure UF2");
     *skip=offset;error[0]=0;return true;
 }
+bool iq_uf2_validate(const uint8_t *data,size_t length,size_t *skip,char *error,size_t size)
+{ return iq_uf2_validate_version(data,length,skip,NULL,error,size); }

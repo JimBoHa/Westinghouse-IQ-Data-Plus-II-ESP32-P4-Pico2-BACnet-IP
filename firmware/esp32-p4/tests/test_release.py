@@ -64,6 +64,9 @@ class ReleaseTests(unittest.TestCase):
             with self.assertRaises((ValueError,KeyError)):release.verify_files(files)
 
     def test_role_chip_family_and_image_metadata_rejected(self):
+        data=pico().replace(b"0.4.7\0",b"0.4.8\0")
+        self.assertEqual(release.pico_metadata(data)["version"],"0.4.8")
+        with self.assertRaises(ValueError):release.pico_metadata(data.replace(b"0.4.8\0",b"0.4.9\0"))
         with self.assertRaises(ValueError):release.p4_metadata(application(True),False)
         for offset in (0,12,32,80):
             data=bytearray(application());data[offset]^=0x01

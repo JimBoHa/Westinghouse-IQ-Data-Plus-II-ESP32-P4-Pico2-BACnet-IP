@@ -69,7 +69,7 @@ static void usb_printf(const char *format, ...) {
 static void info(void) {
     char id[2*PICO_UNIQUE_BOARD_ID_SIZE_BYTES+1];
     pico_get_unique_board_id_string(id,sizeof id);
-    printf("{\"type\":\"info\",\"firmware\":\"iqdata-pico-live\",\"version\":\"0.4.7\",\"build_board\":\"%s\",\"id\":\"%s\",\"live_enabled\":true,\"initial_status_hold_clocks\":0,\"framing\":\"classic_27_positions\",\"synthetic_host\":false,\"timing\":\"pio_transaction_core1_observe_int\",\"watchdog_reboot\":%s,\"pins\":{\"CLK\":0,\"RW\":1,\"DATA\":2,\"INT\":3},\"drive\":\"low_or_release\"}\n",LIVE_BOARD,id,boot_watchdog?"true":"false");
+    printf("{\"type\":\"info\",\"firmware\":\"iqdata-pico-live\",\"version\":\"0.4.8\",\"build_board\":\"%s\",\"id\":\"%s\",\"live_enabled\":true,\"initial_status_hold_clocks\":0,\"framing\":\"classic_27_positions\",\"synthetic_host\":false,\"timing\":\"pio_transaction_core1_observe_int\",\"watchdog_reboot\":%s,\"pins\":{\"CLK\":0,\"RW\":1,\"DATA\":2,\"INT\":3},\"drive\":\"low_or_release\"}\n",LIVE_BOARD,id,boot_watchdog?"true":"false");
 }
 static void status(void) {
     printf("{\"type\":\"status\",\"active\":%s,\"pins\":%lu,\"sio_output_enables\":%lu,\"clk_ctrl\":%lu,\"rw_ctrl\":%lu,\"data_ctrl\":%lu,\"int_ctrl\":%lu}\n",live_active?"true":"false",(unsigned long)(sio_hw->gpio_in&15u),(unsigned long)(sio_hw->gpio_oe&15u),(unsigned long)io_bank0_hw->io[0].ctrl,(unsigned long)io_bank0_hw->io[1].ctrl,(unsigned long)io_bank0_hw->io[2].ctrl,(unsigned long)io_bank0_hw->io[3].ctrl);
@@ -85,6 +85,24 @@ static const char *event_name(uint32_t kind) {
         default:return "fault";
     }
 }
+static void report_pio_diagnostics(const live_result_t *r) {
+    static const char *const names[]={
+#define IQ_PIO_NAME(symbol,name) #name,
+        IQ_PIO_DIAGNOSTICS(IQ_PIO_NAME)
+#undef IQ_PIO_NAME
+    };
+    /* Eight fields per record stays below the existing 1024-byte line limit,
+     * even when every 32-bit counter reaches its largest decimal value. */
+    for(unsigned base=0;base<IQ_PIO_DIAGNOSTIC_COUNT;base+=8) {
+        char text[1024];size_t used=(size_t)snprintf(text,sizeof(text),"{\"type\":\"pio_diagnostics\",\"schema\":1");
+        for(unsigned i=base;i<base+8&&i<IQ_PIO_DIAGNOSTIC_COUNT;i++) {
+            int n=snprintf(text+used,sizeof(text)-used,",\"%s\":%lu",names[i],(unsigned long)r->pio_diagnostics[i]);
+            if(n<0||(size_t)n>=sizeof(text)-used)safe_reboot();
+            used+=(size_t)n;
+        }
+        printf("%s}\n",text);
+    }
+}
 static void report(void) {
     output_begin();
     for (uint32_t i=0;i<live_result.events;++i) {
@@ -94,6 +112,7 @@ static void report(void) {
     }
     live_result_t *r=&live_result;
     if (report_mode==MODE_TRANSACTION) {
+        report_pio_diagnostics(r);
         printf("{\"type\":\"timing\",\"engine\":\"pio\",\"clock_hz\":%lu,\"bracketed_sampling\":false,\"event_timestamps\":\"cpu_service_microseconds\",\"read_words\":\"presented_images_not_wire_samples\",\"clock_count_scope\":\"completed_program_shifts_and_captured_writes\"}\n",(unsigned long)r->sys_hz);
     } else {
         printf("{\"type\":\"timing\",\"engine\":\"cpu\",\"clock_hz\":%lu,\"maximum_sample_gap_cycles\":%lu,\"active_limit_cycles\":%lu,\"bracketed_sampling\":true}\n",(unsigned long)r->sys_hz,(unsigned long)r->max_sample_gap_cycles,(unsigned long)r->sample_gap_limit_cycles);
