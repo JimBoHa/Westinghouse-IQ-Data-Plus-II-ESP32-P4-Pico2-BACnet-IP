@@ -1,7 +1,8 @@
 # ESP32-P4 / plain Pico 2 validation
 
-This is a development port, not a completed meter installation. The original
-Pi deployment evidence in `docs/VALIDATION.md` does not qualify the new P4 path.
+The sections below distinguish initial bring-up without a meter from subsequent
+installed-meter tests. The original Pi deployment evidence in
+`docs/VALIDATION.md` does not independently qualify the P4 path.
 
 ## Source and hardware
 
@@ -14,7 +15,8 @@ Pi deployment evidence in `docs/VALIDATION.md` does not qualify the new P4 path.
   variant was not independently identified.
 - Programming interface: CH343 USB-C. Pico connection: USB-A host, directly
   attached plain Raspberry Pi Pico 2. RP2350 ROM enumerates as `2e8a:000f`;
-  installed CDC firmware enumerates as `2e8a:0009` and reports `0.4.7 / pico2`.
+  installed CDC firmware enumerates as `2e8a:0009`. Initial firmware reported
+  `0.4.7 / pico2`; the installed-meter update below uses 0.4.8.
 - Full 32 MiB factory flash and later application/configuration backups were
   saved privately before replacement. Security state was inspected and left
   unchanged; no full-chip erase, eFuse writes or security provisioning occurred.
@@ -29,7 +31,8 @@ Build commands are in `README.md` and root `AGENTS.md`.
 - ESP-IDF 5.5.5, commit `b774170ff46c393eeb5e495ea37936038d3f4f4f`;
   RISC-V GCC 14.2.0 (`esp-14.2.0_20260121`).
 - Pico SDK 2.3.1; Arm GNU Toolchain 15.2.Rel1 (GCC 15.2.1),
-  `PICO_BOARD=pico2`. Existing 0.4.7 timing/PIO source is unchanged.
+  `PICO_BOARD=pico2`. Initial 0.4.7 timing/PIO source was unchanged; the local
+  0.4.8 clock qualification change is described below.
 - BACnet Stack 1.6.0, cJSON 1.7.19, CDC ACM 2.4.1, MSC 1.1.4 and mDNS 1.9.1
   are pinned by Git submodules/component lock.
 - Upstream tests: 86 live/runtime tests, 10 installer tests, five poller tests,
@@ -129,13 +132,49 @@ Polling was restored/left disabled. Site identities, captures, tokens, signed
 backups, and detailed reports remain private. Final CI artifact deployment and
 regression outcomes are recorded in PR #8 and the private hardware handoff.
 
+## Installed-meter communication (October 3, 2026)
+
+An installed meter initially stalled after a short CLK pulse advanced the first
+request bit and cleared INT. Passive observations showed regular meter clocks;
+active reader X/OSR snapshots and a separate, input-only PIO pulse-width probe
+isolated the failure. Those snapshots are digital evidence, not oscilloscope
+voltage measurements or a determination of the physical noise source.
+
+Pico 0.4.8 now qualifies CLK before clearing INT or advancing DATA. Signed P4
+0.4.4 and Pico 0.4.8 updates were installed through Ethernet, preserving the
+commissioned identity and powered USB-A connection. Bounded live testing then
+accepted complete standard buffers and diagnostic replies without malformed
+writes or USB overflow. More than 300 standard reads and 40 diagnostic reads
+succeeded with no failures during the initial sustained test. Reported voltage
+and current matched the user's earlier display report; no contemporaneous
+display verification is claimed and BI2 remains inactive.
+
+Independent directed BACnet discovery, the complete 200-object catalog and
+live RP/RPM reads passed. All 198 point identifiers remain unchanged. The
+calculated PF magnitude is intentionally unavailable when both P and Q are
+zero; this also keeps the existing all-18-readings quality BI inactive. That
+condition must not be mistaken for a failed transport transaction.
+
+A five-minute pinned-HTTPS/directed-BACnet soak passed all 21 scheduled samples,
+with no reboot, USB failure, identity conflict or health alert. Minimum internal
+free heap was 194,015 bytes. Raw captures, device identity, firmware hashes and
+site measurements are retained privately.
+
+All 14 native CTest suites passed with sanitizers. The assembled-PIO regression
+test checks isolated short pulses, full requests, one-clock completions, stale
+IRQ rejection and RW cancellation for both edge variants. Removing the delay
+or restoring direct raw-CLK reader advancement makes the test fail. Physical
+meter testing used the normal rising-edge path; a native instruction model does
+not qualify the falling-edge path electrically.
+
 ## Remaining qualification
 
-- **Meter absent:** no physical electrical/logic-analyzer qualification, real
-  meter response/word/display comparison, CT/PT/site-address verification or
-  complete Pico-to-meter-to-BACnet path validation was possible.
+- The installed-meter tests establish the Pico-to-meter-to-BACnet communication
+  path on that device. Independent external logic-analyzer/voltage qualification,
+  contemporaneous display comparison and CT/PT configuration verification
+  remain separate work.
 - The four-gateway commissioning and meter connection checklist is in the
-  build guide. Polling is left disabled until the meter address and wiring are
+  build guide. New devices leave polling disabled until meter address and wiring are
   verified. GP0/GP1 are CLK/RW inputs; GP2/GP3 are DATA/INT LOW-or-released.
   Keep Pico powered whenever meter signals are connected.
 - A continuous physical 15-minute meter run, physical hour/day windows, long
