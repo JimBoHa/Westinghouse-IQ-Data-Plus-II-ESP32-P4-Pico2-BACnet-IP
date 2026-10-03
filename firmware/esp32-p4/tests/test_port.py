@@ -209,13 +209,14 @@ class PortTests(unittest.TestCase):
         records=self.stream_records()
         diagnostic=dict(type="pio_diagnostics",schema=1,cpu_clock_rises=3200,reader_pc=7,
                         reader_instruction=0x2080,pio_output_enables_before_release=8,
-                        int_ctrl_before_release=0xffffffff)
+                        int_ctrl_before_release=0xffffffff,reader_remaining_x=26)
         got=self.stream(records[:-1]+[diagnostic]+records[-1:],chunk=3)
         self.assertTrue(got["ok"])
         self.assertEqual(got["words"],[2,0])
         observed=got["diagnostics"]["pio_diagnostics"]
         self.assertEqual(observed["cpu_clock_rises"],3200)
         self.assertEqual(observed["int_ctrl_before_release"],0xffffffff)
+        self.assertEqual(observed["reader_remaining_x"],26)
         self.assertIsNone(observed["cpu_rw_falls"])
         # A counter cannot replace the completed request and reply provenance.
         incomplete=records[:2]+[diagnostic,self.terminal_for(records[:2])]

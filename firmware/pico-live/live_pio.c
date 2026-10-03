@@ -180,6 +180,12 @@ void live_pio_run(live_config_t c) {
         uint32_t changed=pins^before;
         if((changed&CLK)&&(pins&CLK))++diagnostics[IQ_PIO_CPU_CLOCK_RISES];
         if(changed&RW)++diagnostics[(pins&RW)?IQ_PIO_CPU_RW_RISES:IQ_PIO_CPU_RW_FALLS];
+        if(changed&INT) {
+            unsigned edge=(pins&INT)?IQ_PIO_FIRST_INT_RISE_US:IQ_PIO_FIRST_INT_FALL_US;
+            if(!diagnostics[edge])diagnostics[edge]=elapsed;
+        }
+        if((changed&DATA)&&!(pins&DATA)&&!diagnostics[IQ_PIO_FIRST_DATA_FALL_US])
+            diagnostics[IQ_PIO_FIRST_DATA_FALL_US]=elapsed;
         if (changed&(CLK|RW)) last_activity=now;
         if (pins&CLK) last_activity=now;
         if (changed&DATA) ++live_result.data_edges;
@@ -309,6 +315,8 @@ void live_pio_run(live_config_t c) {
                 diagnostics[IQ_PIO_REQUEST_RW_FALLS]=diagnostics[IQ_PIO_CPU_RW_FALLS];
                 diagnostics[IQ_PIO_REQUEST_RW_RISES]=diagnostics[IQ_PIO_CPU_RW_RISES];
                 diagnostics[IQ_PIO_REQUEST_US]=elapsed;
+                diagnostics[IQ_PIO_REQUEST_PINS]=sio_hw->gpio_in&15u;
+                diagnostics[IQ_PIO_REQUEST_PADOE]=pio0->dbg_padoe&15u;
             }
             pio_sm_set_enabled(pio0,READER,true);
             if (!record(elapsed,origin==LIVE_PIO_ORIGIN_REQUEST?EV_REQUEST:EV_COMPLETE,reader_shifts,image,origin)) break;
@@ -348,6 +356,16 @@ void live_pio_run(live_config_t c) {
     diagnostics[IQ_PIO_PIO1_GPIOBASE]=pio_get_gpio_base(pio1);
     diagnostics[IQ_PIO_DATA_CTRL]=io_bank0_hw->io[PIN_DATA].ctrl;
     diagnostics[IQ_PIO_INT_CTRL]=io_bank0_hw->io[PIN_INT].ctrl;
+    /* Scratch registers can only be inspected after outputs are forced
+     * released and every transport SM has stopped. No injected instruction
+     * is allowed to act on the live interface. Reader never uses its RX FIFO. */
+    live_pio_release();
+    pio_sm_exec(pio0,READER,pio_encode_mov(pio_isr,pio_x));
+    pio_sm_exec(pio0,READER,pio_encode_push(false,false));
+    diagnostics[IQ_PIO_READER_X]=pio_sm_get(pio0,READER);
+    pio_sm_exec(pio0,READER,pio_encode_mov(pio_isr,pio_osr));
+    pio_sm_exec(pio0,READER,pio_encode_push(false,false));
+    diagnostics[IQ_PIO_READER_OSR]=pio_sm_get(pio0,READER);
     restore_sio();
     live_result.elapsed_us=now_us()-began;
     live_result.final_pins=sio_hw->gpio_in&15u;

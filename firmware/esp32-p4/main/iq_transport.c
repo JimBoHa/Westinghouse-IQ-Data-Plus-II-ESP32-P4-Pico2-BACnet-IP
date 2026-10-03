@@ -97,10 +97,10 @@ static bool record(iq_stream_t *s,const cJSON *j)
     if(string_is(j,"type","pio_diagnostics")&&is_number(j,"schema",1)) {
         for(unsigned i=0;i<IQ_PIO_DIAGNOSTIC_COUNT;i++) {
             if(!field(j,iq_pio_diagnostic_names[i]))continue;
-            if((s->pio_diagnostics_present&(1u<<i))||!number(j,iq_pio_diagnostic_names[i],&s->pio_diagnostics[i])) {
+            if((s->pio_diagnostics_present&(UINT64_C(1)<<i))||!number(j,iq_pio_diagnostic_names[i],&s->pio_diagnostics[i])) {
                 iq_stream_error(s,"Invalid or duplicate PIO diagnostic field");return false;
             }
-            s->pio_diagnostics_present|=1u<<i;
+            s->pio_diagnostics_present|=UINT64_C(1)<<i;
         }
         return true;
     }

@@ -50,7 +50,8 @@ typedef struct {
     int8_t released;
     bool timing_pio;
     uint32_t clock_hz;
-    uint32_t pio_diagnostics[IQ_PIO_DIAGNOSTIC_COUNT],pio_diagnostics_present;
+    uint32_t pio_diagnostics[IQ_PIO_DIAGNOSTIC_COUNT];
+    uint64_t pio_diagnostics_present;
     iq_trace_event_t trace[IQ_TRACE_EVENT_CAPACITY];
 } iq_stream_t;
 

@@ -84,7 +84,7 @@ cJSON *iq_transaction_json(const iq_transaction_trace_t *t)
     if(s->clock_hz)cJSON_AddNumberToObject(timing,"clock_hz",s->clock_hz);else cJSON_AddNullToObject(timing,"clock_hz");
     cJSON *pio=cJSON_AddObjectToObject(j,"pio_diagnostics");
     for(unsigned i=0;i<IQ_PIO_DIAGNOSTIC_COUNT;i++) {
-        if(s->pio_diagnostics_present&(1u<<i))cJSON_AddNumberToObject(pio,iq_pio_diagnostic_names[i],s->pio_diagnostics[i]);
+        if(s->pio_diagnostics_present&(UINT64_C(1)<<i))cJSON_AddNumberToObject(pio,iq_pio_diagnostic_names[i],s->pio_diagnostics[i]);
         else cJSON_AddNullToObject(pio,iq_pio_diagnostic_names[i]);
     }
     cJSON *trace=cJSON_AddObjectToObject(j,"event_trace"),*events=cJSON_AddArrayToObject(trace,"events");
