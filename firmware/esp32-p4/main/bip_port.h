@@ -8,6 +8,7 @@
 #include "bacnet/datalink/bip.h"
 void bip_port_configure(uint32_t ip, uint32_t mask, uint32_t gateway, uint16_t port);
 bool bip_port_last_receive_was_broadcast(void);
+uint8_t bip_port_last_receive_function(void);
 uint16_t bip_port_decode_datagram(const uint8_t *frame, size_t length,
     uint32_t source_ip, uint16_t source_port, BACNET_ADDRESS *source,
     uint8_t *npdu, uint16_t capacity);

@@ -35,6 +35,7 @@ static bool s_debug;
 /* The BACnet task consumes each NPDU synchronously, so this records the BVLC
    origin type for the service handler invoked by that same receive call. */
 static bool s_last_receive_was_broadcast;
+static uint8_t s_last_receive_function;
 static char s_interface[16] = "eth0";
 #ifndef ESP_PLATFORM
 static bip_port_send_fn s_send_hook;
@@ -295,8 +296,11 @@ uint16_t bip_port_decode_datagram(const uint8_t *frame, size_t received,
         s_last_receive_was_broadcast = true;
     }
     memcpy(pdu, &frame[offset], npdu_len);
+    s_last_receive_function = function;
     return npdu_len;
 }
+
+uint8_t bip_port_last_receive_function(void) { return s_last_receive_function; }
 
 bool bip_port_last_receive_was_broadcast(void)
 {

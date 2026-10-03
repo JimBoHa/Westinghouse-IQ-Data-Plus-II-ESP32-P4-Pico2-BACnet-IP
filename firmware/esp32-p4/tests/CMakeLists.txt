@@ -59,6 +59,10 @@ add_executable(test_identity test_identity.c)
 target_link_libraries(test_identity PRIVATE iqbacnet)
 add_test(NAME instance_conflicts COMMAND test_identity)
 
+add_executable(test_discovery test_discovery.c)
+target_link_libraries(test_discovery PRIVATE iqbacnet)
+add_test(NAME discovery_replies COMMAND test_discovery)
+
 add_test(NAME restart_codec COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/run_bacnet_restart_tests.py)
 add_executable(test_restart_integration test_restart_integration.c)
 target_link_libraries(test_restart_integration PRIVATE iqbacnet)
