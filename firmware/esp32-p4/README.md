@@ -1,6 +1,6 @@
 # IQ Data Plus II on ESP32-P4 and plain Pico 2
 
-Development port derived from the original Raspberry Pi gateway. Source for the Raspberry Pi remains unchanged. This target runs C on ESP-IDF 5.5.5, hosts the existing Pico USB protocol, and exposes the original 198 BACnet points. See `ATTRIBUTION.md` for dependency and source provenance. Physical meter qualification is separate from the firmware and network tests.
+Development port derived from the original Raspberry Pi gateway. The Linux gateway remains available as a reference. This target runs C on ESP-IDF 5.5.5, hosts the Pico USB protocol, and exposes the original 198 BACnet points. See `ATTRIBUTION.md` for dependency and source provenance. Physical meter qualification is separate from the firmware and network tests.
 
 See [validation status](VALIDATION.md) for the tests actually completed and the remaining meter qualification.
 
@@ -32,9 +32,15 @@ For plain Pico 2, set `PICO_SDK_PATH` to SDK 2.3.1 and `PICO_TOOLCHAIN_PATH` to 
 ```sh
 cmake -S firmware/pico-live -B build/pico2 -G Ninja -DPICO_BOARD=pico2 -DCMAKE_BUILD_TYPE=Release
 cmake --build build/pico2
+python3 firmware/pico-live/test_clock_filter.py build/pico2/live_transport.pio.h
 ```
 
 Artifact: `build/pico2/iqdata_pico_live.uf2`, firmware 0.4.8, RP2350 ARM Secure image type. “ARM Secure” is the normal RP2350 execution state, not provisioning secure boot or OTP keys. Do not use the original Pico 2 W artifact for this target.
+
+Pico 0.4.8 qualifies CLK before advancing request DATA or clearing INT. Short
+CLK spikes previously consumed the first request bit and stalled reads. P4
+0.4.4 accepts the new firmware and exposes bounded active PIO diagnostics;
+see [diagnostic details](docs/DIAGNOSTICS.md#active-pio-snapshots).
 
 ## Wiring and power
 

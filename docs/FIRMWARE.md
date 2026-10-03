@@ -2,9 +2,12 @@
 
 The supplied `firmware/pico-live/dist/iqdata_pico_live.uf2` is the tested
 **Pico 2 W / RP2350** build, version **0.4.7**. Check the board's printed model.
-It is not an original Pico/Pico W (RP2040) binary. A Pico 2 target can be built
-separately with `-DPICO_BOARD=pico2`; that target has not been physically tested
-in this project. Wi-Fi is unused; the Pi connects by USB.
+It is not an original Pico/Pico W (RP2040) binary. Wi-Fi is unused; the Pi
+connects by USB. This retained artifact predates the shared source's 0.4.8 CLK
+qualification update. Plain Pico 2 builds and current physical test scope are
+documented in the [P4 guide](../firmware/esp32-p4/README.md). The checksums below
+cover the current source files and the separately retained 0.4.7 binary; that
+legacy binary is not a build of the current source.
 
 ## Load the supplied image
 
