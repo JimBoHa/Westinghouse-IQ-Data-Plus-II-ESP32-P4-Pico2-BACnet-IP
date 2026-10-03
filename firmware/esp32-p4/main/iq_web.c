@@ -265,9 +265,11 @@ static esp_err_t pico_handler(httpd_req_t *r)
 done:
     free(data);atomic_store(&updating,false);
     if(!success) { iq_event("ota","pico_failed",1,error);return httpd_resp_send_err(r,HTTPD_400_BAD_REQUEST,error); }
-    iq_event("ota","pico_verified",0,"Expected Pico 0.4.7 / pico2 returned");
+    iq_usb_status_t runtime;iq_usb_status(&runtime);char version[16]={0};
+    (void)sscanf(runtime.version,"Pico %15s",version);
+    iq_event("ota","pico_verified",0,runtime.version);
     cJSON *j=cJSON_CreateObject();cJSON_AddBoolToObject(j,"pico_boot_verified",true);
-    cJSON_AddStringToObject(j,"firmware","iqdata-pico-live");cJSON_AddStringToObject(j,"version","0.4.7");
+    cJSON_AddStringToObject(j,"firmware","iqdata-pico-live");cJSON_AddStringToObject(j,"version",version);
     cJSON_AddStringToObject(j,"board","pico2");cJSON_AddStringToObject(j,"upload_sha256",digest);
     return json_reply(r,j);
 }

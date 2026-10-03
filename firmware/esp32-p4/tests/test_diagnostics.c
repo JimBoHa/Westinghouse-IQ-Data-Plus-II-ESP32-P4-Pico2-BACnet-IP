@@ -2,6 +2,7 @@
 #include "iq_meter_trace.h"
 #include <assert.h>
 #include <string.h>
+#include <stdio.h>
 int main(void)
 {
     iq_event_ring_t r={0};
@@ -31,5 +32,12 @@ int main(void)
     assert(cJSON_GetObjectItem(cJSON_GetArrayItem(a,0),"sequence")->valueint==12);
     assert(cJSON_GetObjectItem(cJSON_GetArrayItem(a,7),"sequence")->valueint==5);
     assert(cJSON_IsNull(cJSON_GetObjectItem(cJSON_GetArrayItem(a,0),"utc_ms")));
-    cJSON_Delete(j);return 0;
+    cJSON_Delete(j);
+    for(unsigned patch=7;patch<=9;patch++) {
+        char identity[512],version[48];
+        snprintf(identity,sizeof(identity),"{\"type\":\"info\",\"firmware\":\"iqdata-pico-live\",\"version\":\"0.4.%u\",\"build_board\":\"pico2\",\"live_enabled\":true,\"synthetic_host\":false,\"drive\":\"low_or_release\",\"pins\":{\"CLK\":0,\"RW\":1,\"DATA\":2,\"INT\":3}}",patch);
+        assert(iq_pico_identity(identity,version,sizeof(version))==(patch<9));
+        if(patch<9) { char expected[48];snprintf(expected,sizeof(expected),"Pico 0.4.%u / pico2",patch);assert(!strcmp(expected,version)); }
+    }
+    return 0;
 }

@@ -30,7 +30,7 @@ static void new_device(usb_device_handle_t device)
     xSemaphoreTake(status_lock,portMAX_DELAY);
     ++status.devices_seen;status.last_vid=desc->idVendor;status.last_pid=desc->idProduct;
     if(desc->idVendor==0x2e8a&&desc->idProduct==0x000f)
-        snprintf(status.last_error,sizeof(status.last_error),"RP2350 BOOTSEL: install plain Pico 2 iqdata-pico-live 0.4.7 firmware");
+        snprintf(status.last_error,sizeof(status.last_error),"RP2350 BOOTSEL: install signed plain Pico 2 iqdata-pico-live firmware");
     xSemaphoreGive(status_lock);
     ESP_LOGI("iq_usb","USB device %04x:%04x class %02x",desc->idVendor,desc->idProduct,desc->bDeviceClass);
 }
@@ -136,7 +136,7 @@ static bool identify(cdc_acm_dev_hdl_t device)
             line[used]=0;
             char version[48];
             if(!iq_pico_identity(line,version,sizeof(version))) {
-                failure("Pico identity mismatch: require iqdata-pico-live 0.4.7, build_board=pico2");return false;
+                failure("Pico identity mismatch: require iqdata-pico-live 0.4.7/0.4.8, build_board=pico2");return false;
             }
             xSemaphoreTake(status_lock,portMAX_DELAY);
             snprintf(status.version,sizeof(status.version),"%s",version);status.qualified=true;

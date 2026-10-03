@@ -102,6 +102,20 @@ The response's boot ID and observation sequence let clients reject results
 from a restarted gateway or a replacement request. Refresh and download remain
 read-only; only the explicit observation command starts a capture.
 
+## Active PIO snapshots
+
+P4 0.4.4 can qualify Pico 0.4.7 or 0.4.8; signed UF2 updates verify that the
+specific uploaded version returns. Pico 0.4.8 adds `pio_diagnostics` records to
+active reads. These are separate from measurement events and never supply DATA
+words or relax transaction validation. Older Pico firmware reports null fields.
+
+The records include CPU-sampled CLK/RW edges, counters at the last request,
+and PIO program counters, instructions, FIFO level, IRQ/debug/control registers
+and GPIO controls before output release. CPU sampling can miss short pulses;
+the register reads are sequential snapshots, not a synchronous logic-analyzer
+capture. Compare CPU activity with PIO progress to distinguish a silent bus from
+a stalled state machine. Diagnostics remain bounded and RAM-only.
+
 ## Network time
 
 An NTP client starts after the first allowed Ethernet address. The build's

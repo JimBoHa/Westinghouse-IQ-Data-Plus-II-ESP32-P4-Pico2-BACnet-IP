@@ -5,6 +5,7 @@
 #include "hardware/pio.h"
 #include "hardware/structs/sio.h"
 #include "hardware/structs/timer.h"
+#include "hardware/structs/io_bank0.h"
 #include "live_transport.pio.h"
 #include "writer_arm.h"
 
@@ -156,6 +157,7 @@ void live_pio_run(live_config_t c) {
     uint32_t image=0, origin=0, pending_origin=0, reader_shifts=27;
     uint32_t request_due=began+20000u;
     uint32_t int_bad_since=0, data_bad_since=0;
+    uint32_t *diagnostics=live_result.pio_diagnostics;
     bool int_bad=false, data_bad=false, started=false, guard_armed=false;
     bool guard_risen=false, guard_rearming=false, reader_active=false;
     bool request_sent=false, completion_pending=false;
@@ -176,6 +178,8 @@ void live_pio_run(live_config_t c) {
             break;
         }
         uint32_t changed=pins^before;
+        if((changed&CLK)&&(pins&CLK))++diagnostics[IQ_PIO_CPU_CLOCK_RISES];
+        if(changed&RW)++diagnostics[(pins&RW)?IQ_PIO_CPU_RW_RISES:IQ_PIO_CPU_RW_FALLS];
         if (changed&(CLK|RW)) last_activity=now;
         if (pins&CLK) last_activity=now;
         if (changed&DATA) ++live_result.data_edges;
@@ -300,6 +304,12 @@ void live_pio_run(live_config_t c) {
                 break;
             }
             reader_active=true;
+            if(origin==LIVE_PIO_ORIGIN_REQUEST) {
+                diagnostics[IQ_PIO_REQUEST_CLOCK_RISES]=diagnostics[IQ_PIO_CPU_CLOCK_RISES];
+                diagnostics[IQ_PIO_REQUEST_RW_FALLS]=diagnostics[IQ_PIO_CPU_RW_FALLS];
+                diagnostics[IQ_PIO_REQUEST_RW_RISES]=diagnostics[IQ_PIO_CPU_RW_RISES];
+                diagnostics[IQ_PIO_REQUEST_US]=elapsed;
+            }
             pio_sm_set_enabled(pio0,READER,true);
             if (!record(elapsed,origin==LIVE_PIO_ORIGIN_REQUEST?EV_REQUEST:EV_COMPLETE,reader_shifts,image,origin)) break;
             if (origin==LIVE_PIO_ORIGIN_REQUEST) { request_sent=true; ++live_result.requests; }
@@ -316,6 +326,28 @@ void live_pio_run(live_config_t c) {
             else if (now-data_bad_since>=2u) { live_result.stop=STOP_DATA_HIGH; break; }
         } else data_bad=false;
     }
+    /* Read registers before cleanup changes the mux or halts machines. Never
+     * execute PIO instructions to inspect scratch registers on the live bus. */
+    diagnostics[IQ_PIO_LAST_ACTIVITY_US]=last_activity-began;
+    diagnostics[IQ_PIO_END_PINS]=sio_hw->gpio_in&15u;
+    diagnostics[IQ_PIO_PADOE]=pio0->dbg_padoe&15u;
+    diagnostics[IQ_PIO_READER_PC]=pio_sm_get_pc(pio0,READER);
+    diagnostics[IQ_PIO_READER_INSTR]=pio0->sm[READER].instr;
+    diagnostics[IQ_PIO_READER_TX]=pio_sm_get_tx_fifo_level(pio0,READER);
+    diagnostics[IQ_PIO_GUARD_PC]=pio_sm_get_pc(pio0,GUARD);
+    diagnostics[IQ_PIO_INT_PC]=pio_sm_get_pc(pio0,INT_CLEAR);
+    diagnostics[IQ_PIO_WRITER_PC]=pio_sm_get_pc(pio1,WRITER);
+    diagnostics[IQ_PIO_PIO0_CTRL]=pio0->ctrl;diagnostics[IQ_PIO_PIO1_CTRL]=pio1->ctrl;
+    diagnostics[IQ_PIO_PIO0_IRQ]=pio0->irq;diagnostics[IQ_PIO_PIO1_IRQ]=pio1->irq;
+    diagnostics[IQ_PIO_PIO0_FDEBUG]=pio0->fdebug;diagnostics[IQ_PIO_PIO1_FDEBUG]=pio1->fdebug;
+    diagnostics[IQ_PIO_READER_OFFSET]=read_offset;diagnostics[IQ_PIO_GUARD_OFFSET]=guard_offset;
+    diagnostics[IQ_PIO_INT_OFFSET]=int_clear_offset;diagnostics[IQ_PIO_WRITER_OFFSET]=write_offset;
+    diagnostics[IQ_PIO_READER_EXECCTRL]=pio0->sm[READER].execctrl;
+    diagnostics[IQ_PIO_READER_PINCTRL]=pio0->sm[READER].pinctrl;
+    diagnostics[IQ_PIO_PIO0_GPIOBASE]=pio_get_gpio_base(pio0);
+    diagnostics[IQ_PIO_PIO1_GPIOBASE]=pio_get_gpio_base(pio1);
+    diagnostics[IQ_PIO_DATA_CTRL]=io_bank0_hw->io[PIN_DATA].ctrl;
+    diagnostics[IQ_PIO_INT_CTRL]=io_bank0_hw->io[PIN_INT].ctrl;
     restore_sio();
     live_result.elapsed_us=now_us()-began;
     live_result.final_pins=sio_hw->gpio_in&15u;

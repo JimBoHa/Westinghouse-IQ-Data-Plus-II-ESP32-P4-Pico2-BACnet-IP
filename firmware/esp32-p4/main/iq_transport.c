@@ -22,6 +22,11 @@ const char *const iq_trace_names[IQ_TRACE_COUNT]={
     "unknown","request_presented","completion_presented","read_poll",
     "clock_only_fragment","empty_write","meter_write_candidate","fault"
 };
+const char *const iq_pio_diagnostic_names[IQ_PIO_DIAGNOSTIC_COUNT]={
+#define IQ_PIO_NAME(symbol,name) #name,
+    IQ_PIO_DIAGNOSTICS(IQ_PIO_NAME)
+#undef IQ_PIO_NAME
+};
 
 static const cJSON *field(const cJSON *j,const char *key)
 { return cJSON_GetObjectItemCaseSensitive(j,key); }
@@ -89,6 +94,16 @@ static bool record(iq_stream_t *s,const cJSON *j)
         s->started=true; return true;
     }
     if(!s->started) { iq_stream_error(s,"Response outside start/result boundary"); return false; }
+    if(string_is(j,"type","pio_diagnostics")&&is_number(j,"schema",1)) {
+        for(unsigned i=0;i<IQ_PIO_DIAGNOSTIC_COUNT;i++) {
+            if(!field(j,iq_pio_diagnostic_names[i]))continue;
+            if((s->pio_diagnostics_present&(1u<<i))||!number(j,iq_pio_diagnostic_names[i],&s->pio_diagnostics[i])) {
+                iq_stream_error(s,"Invalid or duplicate PIO diagnostic field");return false;
+            }
+            s->pio_diagnostics_present|=1u<<i;
+        }
+        return true;
+    }
     if(string_is(j,"type","timing")) {
         s->timing_pio=string_is(j,"engine","pio");(void)number(j,"clock_hz",&s->clock_hz);
         return true;
@@ -211,11 +226,11 @@ bool iq_pico_identity(const char *line,char *version,size_t size)
 {
     cJSON *j=cJSON_ParseWithLengthOpts(line,strlen(line)+1,NULL,true);
     bool ok=j&&unique(j,0)&&string_is(j,"type","info")&&
-        string_is(j,"firmware","iqdata-pico-live")&&string_is(j,"version","0.4.7")&&
+        string_is(j,"firmware","iqdata-pico-live")&&(string_is(j,"version","0.4.7")||string_is(j,"version","0.4.8"))&&
         string_is(j,"build_board","pico2")&&cJSON_IsTrue(field(j,"live_enabled"))&&
         cJSON_IsFalse(field(j,"synthetic_host"))&&string_is(j,"drive","low_or_release");
     const cJSON *pins=field(j,"pins");
     ok=ok&&is_number(pins,"CLK",0)&&is_number(pins,"RW",1)&&is_number(pins,"DATA",2)&&is_number(pins,"INT",3);
-    if(ok&&version&&size) snprintf(version,size,"Pico 0.4.7 / pico2");
+    if(ok&&version&&size) snprintf(version,size,"Pico %s / pico2",field(j,"version")->valuestring);
     cJSON_Delete(j); return ok;
 }
