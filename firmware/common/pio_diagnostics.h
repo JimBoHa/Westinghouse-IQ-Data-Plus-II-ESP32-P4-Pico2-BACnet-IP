@@ -32,10 +32,18 @@
     X(PIO0_GPIOBASE,pio0_gpio_base) \
     X(PIO1_GPIOBASE,pio1_gpio_base) \
     X(DATA_CTRL,data_ctrl_before_release) \
-    X(INT_CTRL,int_ctrl_before_release)
+    X(INT_CTRL,int_ctrl_before_release) \
+    X(REQUEST_PINS,last_request_pins) \
+    X(REQUEST_PADOE,last_request_output_enables) \
+    X(READER_X,reader_remaining_x) \
+    X(READER_OSR,reader_osr) \
+    X(FIRST_INT_RISE_US,first_int_rise_us) \
+    X(FIRST_INT_FALL_US,first_int_fall_us) \
+    X(FIRST_DATA_FALL_US,first_data_fall_us)
 typedef enum {
 #define IQ_PIO_ENUM(symbol,name) IQ_PIO_##symbol,
     IQ_PIO_DIAGNOSTICS(IQ_PIO_ENUM)
 #undef IQ_PIO_ENUM
     IQ_PIO_DIAGNOSTIC_COUNT
 } iq_pio_diagnostic_index_t;
+_Static_assert(IQ_PIO_DIAGNOSTIC_COUNT<=64,"Diagnostic presence mask capacity");
