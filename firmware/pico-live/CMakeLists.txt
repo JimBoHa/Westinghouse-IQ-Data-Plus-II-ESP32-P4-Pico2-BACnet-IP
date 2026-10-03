@@ -18,5 +18,5 @@ target_compile_definitions(iqdata_pico_live PRIVATE LIVE_BOARD="${PICO_BOARD}" P
 pico_enable_stdio_usb(iqdata_pico_live 1)
 pico_enable_stdio_uart(iqdata_pico_live 0)
 pico_set_program_name(iqdata_pico_live "iqdata-pico-live")
-pico_set_program_version(iqdata_pico_live "0.4.7")
+pico_set_program_version(iqdata_pico_live "0.4.8")
 pico_add_extra_outputs(iqdata_pico_live)

@@ -51,9 +51,10 @@ def pico_metadata(data):
         if header[2:]!=(0x2000,0x10000000+index*256,256,index,len(blocks),0xe48bff59):
             raise ValueError("Wrong Pico family or noncontiguous UF2")
         offset=(index+skip)*512;image.extend(data[offset+32:offset+288])
-    if not all(value in image for value in (b"iqdata-pico-live\0",b"0.4.7\0",b"pico2\0")):
+    versions=[v for v in ("0.4.7","0.4.8") if v.encode()+b"\0" in image]
+    if len(versions)!=1 or not all(value in image for value in (b"iqdata-pico-live\0",b"pico2\0")):
         raise ValueError("Wrong Pico program, version or board")
-    return {"version":"0.4.7","board":"pico2","sdk":"2.3.1","family":"RP2350 ARM Secure"}
+    return {"version":versions[0],"board":"pico2","sdk":"2.3.1","family":"RP2350 ARM Secure"}
 
 
 def check_signature(data, signed, target, pem):

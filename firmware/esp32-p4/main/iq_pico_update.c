@@ -24,8 +24,9 @@ void iq_pico_update_init(void)
 }
 bool iq_pico_update(const uint8_t *uf2,size_t length,char *error,size_t size)
 {
-    size_t skip;
-    if(!iq_uf2_validate(uf2,length,&skip,error,size))return false;
+    size_t skip;char version[16],expected[48];
+    if(!iq_uf2_validate_version(uf2,length,&skip,version,error,size))return false;
+    snprintf(expected,sizeof(expected),"Pico %s / pico2",version);
     iq_usb_status_t before;iq_usb_status(&before);
     /* MSC reports disconnect only while a disk handle is installed. A ROM
      * volume closed before its disconnect may leave an old address cached. */
@@ -84,10 +85,10 @@ done:
         until=esp_timer_get_time()/1000+15000;
         while(esp_timer_get_time()/1000<until) {
             iq_usb_status_t status;iq_usb_status(&status);
-            if(status.qualified) { error[0]=0;return true; }
+            if(status.qualified&&!strcmp(status.version,expected)) { error[0]=0;return true; }
             vTaskDelay(pdMS_TO_TICKS(100));
         }
-        snprintf(error,size,"UF2 transferred; expected Pico 0.4.7 / pico2 identity did not return");
+        snprintf(error,size,"UF2 transferred; expected %s identity did not return",expected);
     }
     return false;
 }

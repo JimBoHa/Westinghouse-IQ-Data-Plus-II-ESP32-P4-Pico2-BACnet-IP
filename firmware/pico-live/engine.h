@@ -1,6 +1,7 @@
 #pragma once
 #include <stdint.h>
 #include <stdbool.h>
+#include "../common/pio_diagnostics.h"
 
 enum { PIN_CLK=0, PIN_RW=1, PIN_DATA=2, PIN_INT=3 };
 enum { MODE_OBSERVE=1, MODE_INT=2, MODE_TRANSACTION=3 };
@@ -16,6 +17,7 @@ typedef struct {
     uint32_t max_sample_gap_cycles, sample_gap_limit_cycles, sys_hz;
     uint32_t stop, initial_pins, final_pins, requests, completions;
     uint32_t startup_retries_before, startup_retries_after;
+    uint32_t pio_diagnostics[IQ_PIO_DIAGNOSTIC_COUNT];
 } live_result_t;
 #define LIVE_EVENT_CAPACITY 4096
 extern live_event_t live_events[LIVE_EVENT_CAPACITY];

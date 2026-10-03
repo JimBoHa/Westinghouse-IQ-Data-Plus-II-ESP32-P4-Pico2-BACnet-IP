@@ -102,6 +102,46 @@ The response's boot ID and observation sequence let clients reject results
 from a restarted gateway or a replacement request. Refresh and download remain
 read-only; only the explicit observation command starts a capture.
 
+## Active PIO snapshots
+
+P4 0.4.4 can qualify Pico 0.4.7 or 0.4.8; signed UF2 updates verify that the
+specific uploaded version returns. Pico 0.4.8 adds `pio_diagnostics` records to
+active reads. These are separate from measurement events and never supply DATA
+words or relax transaction validation. Older Pico firmware reports null fields.
+
+The records include CPU-sampled CLK/RW edges, counters at the last request,
+and PIO program counters, instructions, FIFO level, IRQ/debug/control registers
+and GPIO controls before output release. CPU sampling can miss short pulses;
+the register reads are sequential snapshots, not a synchronous logic-analyzer
+capture. Compare CPU activity with PIO progress to distinguish a silent bus from
+a stalled state machine. Request-time pin/direction snapshots and the first
+observed DATA/INT transitions help locate a stalled handshake. Reader X/OSR are
+inspected only after outputs are forced released and all transport machines
+have stopped. Diagnostics remain bounded and RAM-only.
+
+The separate PIO2 clock probe has no output instructions or pin-mux ownership.
+It reports captured pulse count, first/minimum/maximum HIGH-loop counts, and
+FIFO overflow. Each loop takes two system-clock cycles; entry/exit and input
+synchronization add quantization uncertainty. A zero loop count means a pulse
+too short to enter that counting loop, not no CLK edge. Counts can be incomplete
+if overflow is reported. This probe observes raw CLK, including spikes rejected
+by the transport, and never contributes measurement data.
+
+Pico 0.4.8 checks CLK a second time eight PIO cycles after its initial HIGH
+sample, approximately 53 ns at 150 MHz. Only qualified pulses clear INT and
+notify the reader through IRQ5. Each newly presented image clears any old IRQ5
+before waiting for its own clocks. This rejects isolated short spikes that
+previously advanced the first DATA bit and deasserted INT before a real request
+was read. It is a two-sample digital check, not an analog noise measurement or
+a claim to reject every possible interference waveform. RW ownership, bounded
+deadlines, LOW-or-release outputs and reply validation remain in force.
+
+`test_clock_filter.py` executes the assembled reader and qualifier instructions
+against short pulses, complete requests, one-clock completions and RW changes.
+It checks both edge variants and PIO instruction-memory capacity. This is a
+digital sequencing regression test; it does not model pad voltages, electrical
+timing margins or the separate writer/ownership guard.
+
 ## Network time
 
 An NTP client starts after the first allowed Ethernet address. The build's

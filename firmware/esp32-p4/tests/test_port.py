@@ -205,6 +205,27 @@ class PortTests(unittest.TestCase):
             self.assertNotIn("event_total_mismatch", d["failed_checks"])
             self.assertEqual(d["host_observed"]["data_words"], 0)
 
+    def test_active_pio_diagnostics_do_not_supply_measurements(self):
+        records=self.stream_records()
+        diagnostic=dict(type="pio_diagnostics",schema=1,cpu_clock_rises=3200,reader_pc=7,
+                        reader_instruction=0x2080,pio_output_enables_before_release=8,
+                        int_ctrl_before_release=0xffffffff,reader_remaining_x=26)
+        got=self.stream(records[:-1]+[diagnostic]+records[-1:],chunk=3)
+        self.assertTrue(got["ok"])
+        self.assertEqual(got["words"],[2,0])
+        observed=got["diagnostics"]["pio_diagnostics"]
+        self.assertEqual(observed["cpu_clock_rises"],3200)
+        self.assertEqual(observed["int_ctrl_before_release"],0xffffffff)
+        self.assertEqual(observed["reader_remaining_x"],26)
+        self.assertIsNone(observed["cpu_rw_falls"])
+        # A counter cannot replace the completed request and reply provenance.
+        incomplete=records[:2]+[diagnostic,self.terminal_for(records[:2])]
+        self.assertFalse(self.stream(incomplete)["ok"])
+        self.assertFalse(self.stream(records[:-1]+[diagnostic,diagnostic]+records[-1:])["ok"])
+        for value in (-1,1.5,True,0x100000000):
+            bad=dict(diagnostic,cpu_clock_rises=value)
+            self.assertFalse(self.stream(records[:-1]+[bad]+records[-1:])["ok"])
+
     def test_diagnostics_completion_repeat_and_accounting_failures(self):
         base = self.stream_records()
         # A completed repeat-control exchange is still not meter measurement data.
