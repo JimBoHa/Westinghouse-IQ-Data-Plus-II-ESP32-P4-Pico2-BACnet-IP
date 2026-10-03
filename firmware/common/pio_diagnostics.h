@@ -39,7 +39,12 @@
     X(READER_OSR,reader_osr) \
     X(FIRST_INT_RISE_US,first_int_rise_us) \
     X(FIRST_INT_FALL_US,first_int_fall_us) \
-    X(FIRST_DATA_FALL_US,first_data_fall_us)
+    X(FIRST_DATA_FALL_US,first_data_fall_us) \
+    X(PROBE_PULSES,clock_probe_pulses) \
+    X(PROBE_FIRST_HIGH,clock_probe_first_high_loops) \
+    X(PROBE_MIN_HIGH,clock_probe_min_high_loops) \
+    X(PROBE_MAX_HIGH,clock_probe_max_high_loops) \
+    X(PROBE_OVERFLOW,clock_probe_rx_overflow)
 typedef enum {
 #define IQ_PIO_ENUM(symbol,name) IQ_PIO_##symbol,
     IQ_PIO_DIAGNOSTICS(IQ_PIO_ENUM)
