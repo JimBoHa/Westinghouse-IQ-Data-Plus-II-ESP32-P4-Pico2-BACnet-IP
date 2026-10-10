@@ -65,6 +65,10 @@ python3 firmware/esp32-p4/tools/manage.py --host "$GATEWAY" \
 
 Use only `iqdata_p4_gateway.bin` or the recovery application for P4 OTA.
 Bootloader, partition table, and OTA-selection data are **not OTA payloads**.
+P4 0.4.7 adds the 1 MiB `iqerrors` journal at `0x1100000`; application/recovery
+register this reserved range at runtime on devices with the older partition
+table. Do not rewrite a live partition table to enable logging. Existing OTA
+slots/configuration remain at the same offsets; see [error storage](ERROR_LOG.md).
 The P4 client waits for the exact ELF hash in the other slot with a valid image;
 the Pico client requires the expected runtime identity to return. Keep power
 connected. No eFuses, hardware secure boot, encryption, anti-rollback, or chip

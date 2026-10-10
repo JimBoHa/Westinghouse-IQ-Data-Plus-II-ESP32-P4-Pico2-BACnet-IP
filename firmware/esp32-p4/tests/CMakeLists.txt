@@ -12,7 +12,7 @@ target_include_directories(test_health PRIVATE ../main)
 add_test(NAME startup_health COMMAND test_health)
 set(PORT "${CMAKE_CURRENT_LIST_DIR}/..")
 add_library(iqcore STATIC ${PORT}/main/iq_points.c ${PORT}/main/iq_decode.c
-    ${PORT}/main/iq_diagnostics.c ${PORT}/main/iq_meter_trace.c ${PORT}/main/iq_observe.c ${PORT}/main/iq_model.c ${PORT}/main/iq_transport.c ${PORT}/main/iq_config.c ${PORT}/main/iq_uf2.c
+    ${PORT}/main/iq_diagnostics.c ${PORT}/main/iq_journal.c ${PORT}/main/iq_error_log.c ${PORT}/main/iq_meter_trace.c ${PORT}/main/iq_observe.c ${PORT}/main/iq_model.c ${PORT}/main/iq_transport.c ${PORT}/main/iq_config.c ${PORT}/main/iq_uf2.c
     ${PORT}/third_party/cJSON/cJSON.c)
 target_include_directories(iqcore PUBLIC ${PORT}/main ${PORT}/third_party/cJSON)
 target_link_libraries(iqcore PUBLIC m)
@@ -51,6 +51,9 @@ add_test(NAME https_redirect COMMAND test_https_redirect)
 add_executable(test_diagnostics test_diagnostics.c)
 target_link_libraries(test_diagnostics PRIVATE iqcore)
 add_test(NAME diagnostic_ring COMMAND test_diagnostics)
+add_executable(test_journal test_journal.c)
+target_link_libraries(test_journal PRIVATE iqcore)
+add_test(NAME persistent_error_journal COMMAND test_journal)
 add_executable(test_observe test_observe.c)
 target_link_libraries(test_observe PRIVATE iqcore)
 add_test(NAME passive_observation COMMAND test_observe)
