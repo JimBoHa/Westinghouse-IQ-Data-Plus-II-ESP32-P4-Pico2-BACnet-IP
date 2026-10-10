@@ -34,6 +34,7 @@ static void put(iq_value_t *out, iq_key_t key, double value, bool valid)
 {
     out[key].value = value;
     out[key].valid = valid && isfinite(value);
+    out[key].quality = out[key].valid?IQ_QUALITY_GOOD:IQ_QUALITY_METER_VALUE;
 }
 
 static const iq_key_t live_keys[16] = {
@@ -54,6 +55,7 @@ static bool analog(iq_value_t *out, iq_key_t key, uint32_t word, bool qualified)
     double value = 0;
     bool valid = iq_impacc(word >> 1, &value);
     put(out, key, value, valid && qualified);
+    if(valid&&!qualified)out[key].quality=IQ_QUALITY_NO_TRIP;
     return valid;
 }
 
@@ -138,6 +140,7 @@ bool iq_decode(iq_kind_t kind, const uint32_t *words, size_t count,
             double apparent=hypot(out[IQ_P_W].value,out[IQ_Q_var].value);
             put(out,IQ_S_PQ_estimate_VA,apparent,true);
             put(out,IQ_PF_PQ_magnitude,apparent?fabs(out[IQ_P_W].value)/apparent:0,apparent>0);
+            if(apparent==0)out[IQ_PF_PQ_magnitude].quality=IQ_QUALITY_ZERO_LOAD;
         }
     } else {
         unsigned expected=kind==IQ_FLAGS?2:kind==IQ_SETTINGS?3:18;
