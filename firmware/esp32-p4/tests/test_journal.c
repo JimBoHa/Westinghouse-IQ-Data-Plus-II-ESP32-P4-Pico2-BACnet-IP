@@ -111,6 +111,7 @@ static void aggregation(void)
     assert(!iq_error_should_persist("system","boot",3));
     assert(iq_error_should_persist("system","unexpected_reset",3));
     assert(iq_error_should_persist("meter","transaction_failed",1));
+    assert(!iq_error_should_persist("meter","transaction_cancelled",0));
     iq_error_policy_t p={0};iq_journal_record_t r=record();sink_t sink={0};
     assert(iq_error_policy_submit(&p,&r,0,emit,&sink));assert(sink.records==1);
     for(unsigned i=1;i<60000;i++)assert(iq_error_policy_submit(&p,&r,i,emit,&sink));

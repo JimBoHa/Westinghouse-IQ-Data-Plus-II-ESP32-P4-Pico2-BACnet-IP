@@ -86,7 +86,7 @@ void iq_meter_transaction(const iq_stream_t *stream,uint64_t host_elapsed_ms,boo
         char detail[160];
         snprintf(detail,sizeof(detail),"%s: stop=%d words=%u malformed=%lu; %.80s",
             iq_kind_name(stream->kind),stream->stop,stream->word_count,(unsigned long)stream->malformed,stream->error);
-        iq_event("meter","transaction_failed",1,detail);
+        iq_event("meter",stream->cancelled?"transaction_cancelled":"transaction_failed",stream->cancelled?0:1,detail);
     }
 }
 static void time_synced(struct timeval *time)
