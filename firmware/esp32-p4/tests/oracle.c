@@ -22,6 +22,9 @@ static void values(cJSON *j,const iq_value_t *v)
     for(unsigned i=0;i<IQ_POINT_COUNT;++i) {
         cJSON *p=cJSON_AddObjectToObject(r,iq_points[i].key);
         cJSON_AddBoolToObject(p,"valid",v[i].valid);
+        iq_quality_t quality=iq_value_quality(&v[i]);
+        cJSON_AddStringToObject(p,"quality_reason",iq_quality_name(quality));
+        cJSON_AddStringToObject(p,"reliability",iq_quality_reliability_name(quality));
         if(v[i].valid) cJSON_AddNumberToObject(p,"value",v[i].value);
         else cJSON_AddNullToObject(p,"value");
     }

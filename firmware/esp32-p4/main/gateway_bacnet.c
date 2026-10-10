@@ -467,7 +467,9 @@ void gateway_bacnet_update(const iq_value_t *values)
         bool good=values[i].valid&&isfinite(values[i].value)&&fabs(values[i].value)<=FLT_MAX;
         if (p->object_type==OBJECT_BINARY_INPUT)
             good=good&&(values[i].value==0||values[i].value==1);
-        BACNET_RELIABILITY reliability=good?RELIABILITY_NO_FAULT_DETECTED:RELIABILITY_COMMUNICATION_FAILURE;
+        iq_quality_t quality=iq_value_quality(&values[i]);
+        if(!good&&quality==IQ_QUALITY_GOOD)quality=IQ_QUALITY_METER_VALUE;
+        BACNET_RELIABILITY reliability=(BACNET_RELIABILITY)iq_quality_reliability(quality);
         if (p->object_type==OBJECT_ANALOG_INPUT) {
             if(good) Analog_Input_Present_Value_Set(p->instance,(float)values[i].value);
             Analog_Input_Reliability_Set(p->instance,reliability);
