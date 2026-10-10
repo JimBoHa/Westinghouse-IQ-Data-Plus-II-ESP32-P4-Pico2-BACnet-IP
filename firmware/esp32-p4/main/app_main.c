@@ -207,7 +207,10 @@ cJSON *iq_points_json(void)
             cJSON_AddNumberToObject(p,"age_seconds",(snapshot_ms-values[i].stamp)/1000.0);
         else cJSON_AddNullToObject(p,"age_seconds");
         cJSON_AddNumberToObject(p,"value",values[i].value);cJSON_AddBoolToObject(p,"valid",values[i].valid);
-        cJSON_AddStringToObject(p,"reliability",values[i].valid?"no-fault-detected":"communication-failure");
+        iq_quality_t quality=iq_value_quality(&values[i]);
+        cJSON_AddStringToObject(p,"quality_reason",iq_quality_name(quality));
+        cJSON_AddStringToObject(p,"quality_detail",iq_quality_description(quality));
+        cJSON_AddStringToObject(p,"reliability",iq_quality_reliability_name(quality));
     }
     free(values);return array;
 }

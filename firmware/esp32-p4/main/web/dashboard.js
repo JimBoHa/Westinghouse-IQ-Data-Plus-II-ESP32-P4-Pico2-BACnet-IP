@@ -131,7 +131,7 @@ function renderPoints() {
     const label = element("td",p.name);label.append(element("small",p.description));
     const value = p.valid && Number.isFinite(p.value) ? `${p.value.toLocaleString(undefined,{maximumFractionDigits:4})} ${units[p.units] ?? `unit ${p.units}`}` : "Unavailable";
     const age = p.age_seconds === null ? "Never sampled" : `${p.age_seconds.toFixed(1)} s`;
-    row.append(label,element("td",`${p.type === "analog-input" ? "AI" : "BI"} ${p.instance}`),element("td",value),element("td",p.valid ? "Valid" : "Communication fault",p.valid ? "ok" : "warn"),element("td",age));
+    row.append(label,element("td",`${p.type === "analog-input" ? "AI" : "BI"} ${p.instance}`),element("td",value),element("td",p.valid ? "Valid" : (p.quality_detail || "Communication fault"),p.valid ? "ok" : "warn"),element("td",age));
     row.title = `${p.time_context}. Maximum age: ${p.max_age_seconds ? p.max_age_seconds + " s" : "not age limited"}`;
     return row;
   }));
