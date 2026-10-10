@@ -10,7 +10,7 @@ typedef struct { double a,b,p0,p1; } power_interval_t;
 typedef struct { double time,value; } energy_sample_t;
 struct iq_model {
     iq_value_t raw[IQ_POINT_COUNT];
-    bool group_good[IQ_KIND_COUNT], have_previous, broken;
+    bool group_good[IQ_KIND_COUNT], group_attempted[IQ_KIND_COUNT], have_previous, broken;
     uint64_t last_standard, last_rejected;
     double previous_time, previous_power, previous_energy, first_time;
     double nominal_v, nominal_hz, previous_flags[3], durations[3][2];
@@ -24,6 +24,42 @@ struct iq_model {
 };
 
 size_t iq_model_bytes(void) { return sizeof(iq_model_t); }
+
+iq_quality_t iq_value_quality(const iq_value_t *v)
+{
+    if(v->valid) return isfinite(v->value)?IQ_QUALITY_GOOD:IQ_QUALITY_METER_VALUE;
+    return v->quality>IQ_QUALITY_GOOD&&v->quality<IQ_QUALITY_COUNT?v->quality:IQ_QUALITY_NO_DATA;
+}
+const char *iq_quality_name(iq_quality_t q)
+{
+    static const char *names[]={"good","not-received","communication-failure","stale",
+        "invalid-meter-value","undefined-zero-load","insufficient-history","settings-unavailable",
+        "no-trip-snapshot","unsupported-by-meter","undefined-calculation"};
+    return (unsigned)q<IQ_QUALITY_COUNT?names[q]:"unknown";
+}
+const char *iq_quality_description(iq_quality_t q)
+{
+    static const char *descriptions[]={"Valid","No reading received","Meter communication failed",
+        "Reading is stale","Meter value cannot support this calculation","Undefined at zero load",
+        "Collecting continuous history","Nominal meter settings unavailable","No qualified trip snapshot",
+        "Meter does not supply this value","Calculation is undefined for these inputs"};
+    return (unsigned)q<IQ_QUALITY_COUNT?descriptions[q]:"Unknown quality";
+}
+unsigned iq_quality_reliability(iq_quality_t q)
+{
+    if(q==IQ_QUALITY_GOOD)return 0;
+    if(q==IQ_QUALITY_NO_DATA||q==IQ_QUALITY_COMMUNICATION||q==IQ_QUALITY_STALE)return 12;
+    return q==IQ_QUALITY_METER_VALUE?8:7;
+}
+const char *iq_quality_reliability_name(iq_quality_t q)
+{
+    switch(iq_quality_reliability(q)) {
+    case 0:return "no-fault-detected";
+    case 12:return "communication-failure";
+    case 8:return "process-error";
+    default:return "unreliable-other";
+    }
+}
 
 iq_model_t *iq_model_create(void)
 {
@@ -41,6 +77,7 @@ static void put(iq_model_t *m, iq_key_t key, double value, uint64_t now)
 {
     iq_value_t *v=&m->raw[key];
     v->valid=isfinite(value);
+    v->quality=v->valid?IQ_QUALITY_GOOD:IQ_QUALITY_HISTORY;
     if (v->valid) { v->value=value; v->stamp=now; }
 }
 
@@ -69,7 +106,10 @@ static void nominals(iq_model_t *m, uint64_t now)
         unsigned flag=i==0?2:1;
         m->durations[flag][0]=0;
         m->previous_flags[flag]=NAN;
-        for(unsigned k=0;k<4;++k) m->raw[depend[i][k]].valid=false;
+        for(unsigned k=0;k<4;++k) {
+            m->raw[depend[i][k]].valid=false;
+            m->raw[depend[i][k]].quality=IQ_QUALITY_SETTINGS;
+        }
     }
 }
 
@@ -110,6 +150,9 @@ static double imbalance(const double v[3])
     if(!isfinite(mean)||mean<=0) return NAN;
     return 100*fmax(fabs(v[0]-mean),fmax(fabs(v[1]-mean),fabs(v[2]-mean)))/mean;
 }
+
+static void unavailable(iq_model_t *m,iq_key_t key,iq_quality_t reason)
+{ if(!m->raw[key].valid)m->raw[key].quality=reason; }
 
 static void derive(iq_model_t *m,uint64_t stamp)
 {
@@ -212,6 +255,27 @@ static void derive(iq_model_t *m,uint64_t stamp)
     put(m,IQ_ROLLING_DEMAND_READY,complete,stamp);
     put(m,IQ_ROLLING_HOUR_ENERGY_READY,isfinite(hour),stamp);
     put(m,IQ_ROLLING_DAY_ENERGY_READY,isfinite(day),stamp);
+    iq_quality_t current_reason=!isfinite(currents[0]+currents[1]+currents[2])?
+        IQ_QUALITY_METER_VALUE:IQ_QUALITY_ZERO_LOAD;
+    unavailable(m,IQ_CURRENT_IMBALANCE_pct,current_reason);
+    unavailable(m,IQ_HIGHEST_CURRENT_PHASE,current_reason);
+    unavailable(m,IQ_HIGHEST_CURRENT_A,IQ_QUALITY_METER_VALUE);
+    unavailable(m,IQ_VLL_IMBALANCE_pct,isfinite(volts[0]+volts[1]+volts[2])?
+        IQ_QUALITY_UNDEFINED:IQ_QUALITY_METER_VALUE);
+    const iq_key_t frequency_keys[]={IQ_SESSION_FREQUENCY_MIN_Hz,IQ_SESSION_FREQUENCY_MAX_Hz,
+        IQ_FREQUENCY_EXCURSION_ACTIVE,IQ_FREQUENCY_EXCURSION_CONTINUOUS_s,IQ_FREQUENCY_EXCURSION_TOTAL_s};
+    for(unsigned i=0;i<sizeof(frequency_keys)/sizeof(frequency_keys[0]);i++)
+        unavailable(m,frequency_keys[i],!isfinite(freq)?IQ_QUALITY_METER_VALUE:IQ_QUALITY_SETTINGS);
+    const iq_key_t nominal_keys[]={IQ_NOMINAL_VOLTAGE_V,IQ_NOMINAL_FREQUENCY_Hz,
+        IQ_VOLTAGE_EXCURSION_ACTIVE,IQ_VOLTAGE_EXCURSION_CONTINUOUS_s,IQ_VOLTAGE_EXCURSION_TOTAL_s};
+    for(unsigned i=0;i<sizeof(nominal_keys)/sizeof(nominal_keys[0]);i++)
+        unavailable(m,nominal_keys[i],IQ_QUALITY_SETTINGS);
+    const iq_key_t pf_keys[]={IQ_SESSION_PF_MIN,IQ_SESSION_PF_MAX,IQ_LOW_PF_ACTIVE,
+        IQ_LOW_PF_CONTINUOUS_s,IQ_LOW_PF_TOTAL_s};
+    for(unsigned i=0;i<sizeof(pf_keys)/sizeof(pf_keys[0]);i++)
+        unavailable(m,pf_keys[i],IQ_QUALITY_METER_VALUE);
+    if(complete)unavailable(m,IQ_ROLLING_15MIN_LOAD_FACTOR_pct,
+        peak==0&&lowest==0?IQ_QUALITY_ZERO_LOAD:IQ_QUALITY_UNDEFINED);
     m->previous_time=now; m->previous_power=power; m->previous_energy=energy;
     memcpy(m->previous_flags,flags,sizeof(flags)); m->have_previous=true; m->broken=false;
 }
@@ -225,6 +289,7 @@ static iq_group_t group_for(iq_kind_t kind)
 static void health(iq_model_t *m,iq_kind_t kind,uint64_t now,double duration,int stop,uint32_t malformed,bool good)
 {
     unsigned group=kind==IQ_STANDARD?0:1;
+    m->group_attempted[kind]=true;
     ++m->attempts[group]; m->failures[group]+=!good;
     if(!group) {
         m->consecutive=good?0:m->consecutive+1; m->malformed+=malformed;
@@ -258,7 +323,11 @@ bool iq_model_accept(iq_model_t *m,iq_kind_t kind,const uint32_t *words,size_t c
     iq_group_t group=group_for(kind);
     for(unsigned i=0;i<IQ_POINT_COUNT;++i) if(iq_points[i].group==group) {
         if(decoded[i].valid) { m->raw[i]=decoded[i]; m->raw[i].stamp=now; }
-        else m->raw[i].valid=false;
+        else {
+            m->raw[i].valid=false;
+            m->raw[i].quality=decoded[i].quality==IQ_QUALITY_GOOD?
+                IQ_QUALITY_UNSUPPORTED:decoded[i].quality;
+        }
     }
     m->group_good[kind]=true;
     nominals(m,now);
@@ -277,14 +346,25 @@ void iq_model_snapshot(iq_model_t *m,uint64_t now,iq_value_t out[IQ_POINT_COUNT]
     bool all_good=true;
     for(unsigned i=0;i<IQ_POINT_COUNT;++i) {
         const iq_point_def_t *d=&iq_points[i];
-        out[i].valid=fresh(&out[i],now,d->max_age);
-        if(d->group==IQ_GROUP_LIVE||d->group==IQ_GROUP_DERIVED) out[i].valid &= live;
+        if(out[i].valid&&!fresh(&out[i],now,d->max_age)) {
+            out[i].valid=false;out[i].quality=IQ_QUALITY_STALE;
+        }
+        int source=-1;
+        if(d->group==IQ_GROUP_LIVE||d->group==IQ_GROUP_DERIVED)source=IQ_STANDARD;
         for(unsigned kind=IQ_FLAGS;kind<IQ_KIND_COUNT;++kind)
-            if(d->group==group_for(kind)) out[i].valid &= m->group_good[kind];
+            if(d->group==group_for(kind))source=(int)kind;
+        if(source>=0&&!m->group_good[source]) {
+            out[i].valid=false;
+            out[i].quality=m->group_attempted[source]?IQ_QUALITY_COMMUNICATION:IQ_QUALITY_NO_DATA;
+        } else if(source==IQ_STANDARD&&!live) {
+            out[i].valid=false;out[i].quality=IQ_QUALITY_STALE;
+        }
+        out[i].quality=iq_value_quality(&out[i]);
         if(d->group==IQ_GROUP_LIVE) all_good &= out[i].valid;
         out[i].value*=d->scale;
     }
-    out[IQ_age_seconds]=(iq_value_t){now>=m->last_standard?(now-m->last_standard)/1000.0:0,now,m->samples>0&&now>=m->last_standard};
-    out[IQ_all_18_live_readings_good]=(iq_value_t){all_good,now,true};
-    out[IQ_display_verified]=(iq_value_t){0,now,true};
+    out[IQ_age_seconds]=(iq_value_t){.value=now>=m->last_standard?(now-m->last_standard)/1000.0:0,
+        .stamp=now,.valid=m->samples>0&&now>=m->last_standard};
+    out[IQ_all_18_live_readings_good]=(iq_value_t){.value=all_good,.stamp=now,.valid=true};
+    out[IQ_display_verified]=(iq_value_t){.value=0,.stamp=now,.valid=true};
 }
