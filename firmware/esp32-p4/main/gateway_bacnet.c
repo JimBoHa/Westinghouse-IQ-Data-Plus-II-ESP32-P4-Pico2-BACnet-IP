@@ -196,6 +196,10 @@ static void restart_tick(void)
     }
     bacnet_restart_tick(now_ms,ready,config.device_instance,Device_System_Status());
     bacnet_restart_stats_t state;bacnet_restart_stats_get(&state);
+    if(state.send_failures>stats.restart_failures)
+        iq_event("bacnet","restart_send_failed",1,"Restart notification send failed; retry remains bounded");
+    if(state.exhausted_recipients>stats.restart_exhausted)
+        iq_event("bacnet","restart_exhausted",1,"Restart notification recipient exhausted retry budget");
     stats.restart_sent=state.notifications_sent;stats.restart_failures=state.send_failures;
     stats.restart_exhausted=state.exhausted_recipients;
 }
@@ -261,7 +265,10 @@ static void who_is(uint8_t *data, uint16_t length, BACNET_ADDRESS *source)
     int size=iam_unicast_encode_pdu(transmit_buffer,source,&destination,&npdu);
     int sent=size>0?bip_send_pdu(&destination,&npdu,transmit_buffer,(unsigned)size):-1;
     if(sent>0) { increment(&stats.i_am_sent);increment(&peer->replies);peer->result=2; }
-    else { increment(&stats.i_am_failed);increment(&peer->failures);peer->result=3; }
+    else {
+        increment(&stats.i_am_failed);increment(&peer->failures);peer->result=3;
+        iq_event("bacnet","discovery_send_failed",1,"Who-Is received but I-Am reply could not be sent");
+    }
 }
 
 static void track_read(const BACNET_ADDRESS *source,uint8_t service)

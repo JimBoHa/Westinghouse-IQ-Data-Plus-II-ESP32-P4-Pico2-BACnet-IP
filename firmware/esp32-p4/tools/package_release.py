@@ -152,6 +152,7 @@ def build(args):
            "ota_data_initial.bin":args.p4_build/"ota_data_initial.bin",
            "README.md":PORT/"docs/RELEASES.md","ATTRIBUTION.md":PORT/"ATTRIBUTION.md",
            "SECURITY.md":PORT/"docs/SECURITY.md","toolchains.json":PORT/"toolchains.json",
+           "ERROR_LOG.md":PORT/"docs/ERROR_LOG.md","QUALITY.md":PORT/"docs/QUALITY.md",
            "dependencies.lock":PORT/"dependencies.lock","partitions.csv":PORT/"partitions.csv"}
     for path in (PORT/"third_party/bacnet-stack/license").iterdir():
         if path.is_file():paths["licenses/bacnet-"+path.name]=path

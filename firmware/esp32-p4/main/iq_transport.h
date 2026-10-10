@@ -38,7 +38,7 @@ typedef struct {
     unsigned word_count, events, requests, completed_requests, writes;
     unsigned completions, completed_completions, active_origin;
     uint32_t active_word, active_clocks, completion_us, last_us;
-    bool started, terminal, handshake, handshake_completed, failed, have_time;
+    bool started, terminal, handshake, handshake_completed, failed, have_time, cancelled;
     int stop;
     uint32_t malformed;
     size_t used;
@@ -60,4 +60,7 @@ bool iq_stream_feed(iq_stream_t *stream, const void *bytes, size_t length);
 bool iq_stream_finish(iq_stream_t *stream);
 /* Terminal status must also survive a later transport/parsing failure. */
 void iq_stream_error(iq_stream_t *stream, const char *error);
+/* Planned interruption rejects partial data without inventing a meter fault.
+ * A fault already observed must never be hidden by a later cancellation. */
+void iq_stream_cancel(iq_stream_t *stream, const char *reason);
 bool iq_pico_identity(const char *line, char *version, size_t size);
