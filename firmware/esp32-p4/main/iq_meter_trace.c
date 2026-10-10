@@ -51,7 +51,7 @@ cJSON *iq_transaction_json(const iq_transaction_trace_t *t)
     cJSON_AddStringToObject(j,"request_kind",iq_kind_name(s->kind));
     cJSON_AddNumberToObject(j,"meter_address",s->address);cJSON_AddNumberToObject(j,"duration_ms",500);
     cJSON_AddNumberToObject(j,"host_elapsed_ms",t->host_elapsed_ms);
-    cJSON_AddStringToObject(j,"outcome",t->accepted?"accepted":s->failed?"stream_rejected":"decode_rejected");
+    cJSON_AddStringToObject(j,"outcome",t->accepted?"accepted":s->cancelled?"cancelled":s->failed?"stream_rejected":"decode_rejected");
     cJSON_AddBoolToObject(j,"buffer_accepted",t->accepted);
     cJSON_AddStringToObject(j,"error",s->failed?s->error:t->accepted?"":"Invalid meter DATA buffer");
     cJSON_AddStringToObject(j,"progress",progress(s));

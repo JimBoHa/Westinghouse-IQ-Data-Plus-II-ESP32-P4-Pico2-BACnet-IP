@@ -67,6 +67,10 @@ configuration and unexpected reset reasons. Changes to invalid meter operands
 are logged by point name/count without saving the measurements. Undefined
 zero-load calculations and history warmup are explained by point quality and
 are not treated as repeated communication errors.
+Planned shutdown/firmware-maintenance cancellations remain informational RAM
+events. They reject partial data without logging a meter/USB failure or
+refreshing the previous measurement's age. A previously observed transport
+failure is never reclassified as a cancellation.
 
 ## Verification
 

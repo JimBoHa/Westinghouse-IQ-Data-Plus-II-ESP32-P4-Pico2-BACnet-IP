@@ -56,6 +56,11 @@ void iq_stream_error(iq_stream_t *s,const char *error)
     if(!s->failed) snprintf(s->error,sizeof(s->error),"%s",error);
     s->failed=true;
 }
+void iq_stream_cancel(iq_stream_t *s,const char *reason)
+{
+    if(s->failed)return;
+    s->cancelled=true;iq_stream_error(s,reason);
+}
 void iq_stream_init(iq_stream_t *s,iq_kind_t kind,uint16_t address)
 {
     memset(s,0,sizeof(*s)); s->kind=kind; s->address=address; s->stop=-1;s->released=-1;
