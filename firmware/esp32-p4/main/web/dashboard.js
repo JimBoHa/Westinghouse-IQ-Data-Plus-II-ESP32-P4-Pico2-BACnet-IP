@@ -89,7 +89,7 @@ function renderStatus() {
     const card = element("article", "", "card");
     card.append(element("h3",label),element("strong",value,tone),element("p",info));return card;
   }));
-  detail("#gateway-details",[["Firmware",s.version],["Source revision",s.source_revision],["Hostname",`${s.hostname}.local`],["Uptime",`${Math.floor(s.uptime_seconds/3600)}h ${Math.floor(s.uptime_seconds/60)%60}m ${Math.floor(s.uptime_seconds)%60}s`],["Internal free heap",`${Math.round(s.internal_free_heap/1024)} KiB`],["Pico failures",s.pico.failures],["Point quality",`${b.good_points} valid / ${b.fault_points} unavailable`]]);
+  detail("#gateway-details",[["Firmware",s.version],["Source revision",s.source_revision],["Hostname",`${s.hostname}.local`],["Uptime",`${Math.floor(s.uptime_seconds/3600)}h ${Math.floor(s.uptime_seconds/60)%60}m ${Math.floor(s.uptime_seconds)%60}s`],["Internal free heap",`${Math.round(s.internal_free_heap/1024)} KiB`],["Pico failures",s.pico.failures],["Point quality",`${b.good_points} valid / ${b.fault_points} unavailable`],["Persistent error log",s.persistent_errors?.available ? `${s.persistent_errors.stored_records} saved · ${s.persistent_errors.capacity_bytes/1048576} MiB limit` : (s.persistent_errors?.storage_error || "Unavailable")]]);
   detail("#boot-details",[["Restart notice",`${r.sent || 0} sent · ${r.failures || 0} failures`],["Boot timestamp",r.timestamp_source || "Pending"],["Boot UTC",r.boot_utc_ms ? new Date(r.boot_utc_ms).toISOString() : "Unavailable"],["Reset reason",s.reset_reason],["NTP server",s.clock.server || "Disabled"],["Instance checks",b.instance_checks],["COV timeouts",b.cov_timeouts]]);
   if (!loadedConfig) { fillConfig(); loadedConfig = true; }
   access();
@@ -244,6 +244,38 @@ $("#download").addEventListener("click",() => transaction(async () => {
 $("#refresh-diagnostics").addEventListener("click",() => transaction(async () => {
   renderDiagnostics(await command("/api/diagnostics"));
   notice("Diagnostic snapshot refreshed. No meter read was started.");
+}));
+function renderErrorLog(log) {
+  const target = $("#error-log-records");target.replaceChildren();
+  $("#error-log-state").textContent = log.available ? `${log.stored_records} saved records; newest ${log.records.length} shown. ${log.dropped_this_boot} dropped this boot; ${log.pending_repeat_occurrences} repeat occurrences awaiting save. ${log.invalid_records_skipped} incomplete/corrupt records skipped.` : `Persistent logging unavailable: ${log.storage_error || "unknown storage error"}.`;
+  for (const record of log.records) {
+    const panel = element("details"), when = record.utc_ms ? new Date(record.utc_ms).toISOString() : `Boot ${record.boot_id}, uptime ${(record.uptime_ms/1000).toFixed(1)} s (clock unsynchronized)`;
+    panel.append(element("summary",`#${record.sequence} · ${record.component} / ${record.event} · ${record.occurrences} occurrence${record.occurrences === 1 ? "" : "s"}`),element("p",when,"muted"),element("p",record.detail),element("p",`Code ${record.code} · Firmware ${record.firmware_version} · Boot ${record.boot_id}`,"muted"));
+    target.append(panel);
+  }
+}
+$("#refresh-errors").addEventListener("click",() => transaction(async () => {
+  renderErrorLog(await command("/api/error-log"));notice("Saved error history refreshed.");
+}));
+$("#download-errors").addEventListener("click",() => transaction(async () => {
+  let page = await command("/api/error-log");renderErrorLog(page);
+  if (!page.available) throw new Error(`Error storage unavailable: ${page.storage_error}`);
+  const snapshot = {...page, device_mac:identity, downloaded_utc:new Date().toISOString(), records:[...page.records]};
+  const expected = page.stored_records;
+  for (let pages = 1; page.has_more; pages++) {
+    if (pages > 128 || !Number.isSafeInteger(page.next_before) || page.next_before <= 0) throw new Error("Invalid error-log pagination.");
+    const before = page.next_before;
+    page = await command("/api/error-log",encode(JSON.stringify({before,limit:32})));
+    if (!page.available || page.records.some(record => record.sequence >= before)) throw new Error("Error history changed or became unavailable during download.");
+    snapshot.records.push(...page.records);
+    if (snapshot.records.length > snapshot.capacity_records) throw new Error("Error history exceeds its storage limit.");
+    notice(`Downloading saved errors: ${snapshot.records.length} records.`);
+  }
+  snapshot.has_more = false;snapshot.next_before = null;snapshot.complete = snapshot.records.length === expected;
+  const blob = new Blob([JSON.stringify(snapshot,null,2)+"\n"],{type:"application/json"});
+  const url = URL.createObjectURL(blob), link = document.createElement("a");link.href = url;
+  link.download = `iqdata-errors-${identity.replaceAll(":","")}-${Date.now()}.json`;link.click();setTimeout(() => URL.revokeObjectURL(url),1000);
+  notice(snapshot.complete ? `Downloaded ${snapshot.records.length} saved error records.` : "Downloaded available errors; some older records rotated during the download.",!snapshot.complete);
 }));
 $("#observe-pins").addEventListener("click",() => transaction(async () => {
   const queued = await command("/api/pico/observe"), deadline = Date.now()+20000;

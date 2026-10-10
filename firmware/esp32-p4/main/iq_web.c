@@ -2,6 +2,7 @@
 #include "iq_health.h"
 #include "iq_security.h"
 #include "iq_diagnostics.h"
+#include "iq_error_log.h"
 #include "iq_pico_update.h"
 #include "iq_uf2.h"
 #include "iq_usb.h"
@@ -10,6 +11,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
 #include "esp_http_server.h"
 #include "esp_https_server.h"
 #include "esp_app_desc.h"
@@ -67,6 +69,30 @@ static esp_err_t diagnostics_handler(httpd_req_t *r)
     if(j)cJSON_AddItemToObject(j,"passive_observation",iq_usb_observe_json());
 #endif
     return json_reply(r,j);
+}
+static esp_err_t error_log_handler(httpd_req_t *r)
+{
+    if(!authorized(r))return ESP_OK;
+    if(r->content_len>128)return httpd_resp_send_err(r,HTTPD_400_BAD_REQUEST,"Error-log request too large");
+    char body[129];unsigned used=0;
+    while(used<r->content_len) {
+        int n=httpd_req_recv(r,body+used,r->content_len-used);if(n<=0)return ESP_FAIL;used+=n;
+    }
+    body[used]=0;
+    if(!iq_security_body(r,body,used))return httpd_resp_send_err(r,HTTPD_400_BAD_REQUEST,"Body digest mismatch");
+    uint64_t before=0;unsigned limit=32;
+    if(used) {
+        const char *end=NULL;cJSON *request=cJSON_ParseWithLengthOpts(body,used+1,&end,true);
+        cJSON *cursor=cJSON_GetObjectItemCaseSensitive(request,"before");
+        cJSON *amount=cJSON_GetObjectItemCaseSensitive(request,"limit");
+        bool valid=cJSON_IsObject(request)&&end==body+used&&(!cursor||(cJSON_IsNumber(cursor)&&isfinite(cursor->valuedouble)&&
+            cursor->valuedouble>=0&&cursor->valuedouble<=9007199254740991.0&&floor(cursor->valuedouble)==cursor->valuedouble))&&
+            (!amount||(cJSON_IsNumber(amount)&&amount->valuedouble>=1&&amount->valuedouble<=32&&floor(amount->valuedouble)==amount->valuedouble));
+        if(valid) { if(cursor)before=(uint64_t)cursor->valuedouble;if(amount)limit=(unsigned)amount->valuedouble; }
+        cJSON_Delete(request);
+        if(!valid)return httpd_resp_send_err(r,HTTPD_400_BAD_REQUEST,"Expected optional nonnegative integer before and limit 1..32");
+    }
+    return json_reply(r,iq_error_log_json(before,limit));
 }
 #ifndef IQ_RECOVERY_BUILD
 static esp_err_t observe_handler(httpd_req_t *r)
@@ -300,6 +326,7 @@ void iq_web_start(void)
         {.uri="/api/auth/challenge",.method=HTTP_GET,.handler=challenge_handler},
         {.uri="/api/auth/check",.method=HTTP_POST,.handler=auth_check_handler},
         {.uri="/api/diagnostics",.method=HTTP_POST,.handler=diagnostics_handler},
+        {.uri="/api/error-log",.method=HTTP_POST,.handler=error_log_handler},
         {.uri="/api/reboot",.method=HTTP_POST,.handler=reboot_handler},
         {.uri="/api/pair",.method=HTTP_POST,.handler=pair_handler},
         {.uri="/api/config",.method=HTTP_POST,.handler=config_handler},

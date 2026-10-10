@@ -1,6 +1,7 @@
 #include "iq_management.h"
 #include "iq_health.h"
 #include "iq_diagnostics.h"
+#include "iq_error_log.h"
 #include "iq_security.h"
 #include "iq_config.h"
 #include "iq_usb.h"
@@ -100,7 +101,7 @@ static void restart_task(void *arg)
         if(status.stopped)break;
         vTaskDelay(pdMS_TO_TICKS(25));
     } while(now_ms()<until);
-    esp_restart();
+    (void)iq_error_log_flush(1500);esp_restart();
 }
 void iq_request_restart(void)
 {
@@ -184,6 +185,7 @@ cJSON *iq_status_json(void)
     cJSON_AddBoolToObject(ota,"rollback_enabled",true);
     cJSON_AddItemToObject(ota,"startup_health",iq_health_json());
     cJSON_AddItemToObject(j,"clock",iq_clock_json());
+    cJSON_AddItemToObject(j,"persistent_errors",iq_error_log_status());
     cJSON_AddItemToObject(j,"security",iq_security_json());
     cJSON_AddBoolToObject(j,"restarting",atomic_load(&restarting));
     return j;
@@ -229,7 +231,9 @@ static void network_event(void *arg,esp_event_base_t base,int32_t id,void *data)
         ip_ready=network.ip.addr&&!protected_ip;
         if(ip_ready) { iq_clock_network_ready();iq_event("ethernet","ipv4_ready",0,"IPv4 address assigned"); }
         ESP_LOGI("iq_eth","Address " IPSTR " (%s.local)",IP2STR(&network.ip),hostname);
-    } else if(base==IP_EVENT&&id==IP_EVENT_ETH_LOST_IP)ip_ready=false;
+    } else if(base==IP_EVENT&&id==IP_EVENT_ETH_LOST_IP) {
+        ip_ready=false;iq_event("ethernet","ipv4_lost",1,"Ethernet IPv4 address lost");
+    }
     bool stop=protected_ip;xSemaphoreGive(state_lock);
     if(stop) { ESP_LOGE("iq_eth","Protected production address assigned; stopping Ethernet");esp_netif_action_stop(netif,ETH_EVENT,ETHERNET_EVENT_STOP,NULL); }
 }
@@ -279,7 +283,7 @@ static void bacnet_task(void *arg)
                 .local_ip=ip.ip.addr,.netmask=ip.netmask.addr,.gateway=ip.gw.addr,.dhcp_enabled=settings.dhcp,
                 .vendor_id=0,.database_revision=1,.restart_reason=restart_reason()};
             initialized=gateway_bacnet_init(&cfg,now_ms());
-            if(!initialized) { ESP_LOGE("iq_bacnet","BACnet initialization failed");vTaskDelay(pdMS_TO_TICKS(1000)); }
+            if(!initialized) { iq_event("bacnet","initialization_failed",1,"BACnet initialization failed");ESP_LOGE("iq_bacnet","BACnet initialization failed");vTaskDelay(pdMS_TO_TICKS(1000)); }
             else ESP_LOGI("iq_bacnet","Device %lu: 106 AI + 92 BI",(unsigned long)settings.device_instance);
         }
         if(initialized) {
@@ -288,6 +292,16 @@ static void bacnet_task(void *arg)
             previous=ip;previous_up=ready;
             if(now_ms()>=next) {
                 xSemaphoreTake(model_lock,portMAX_DELAY);iq_model_snapshot(model,now_ms(),values);xSemaphoreGive(model_lock);
+                static uint32_t previous_invalid;
+                uint32_t invalid_hash=0;unsigned invalid_count=0;const char *first="";
+                for(unsigned i=0;i<IQ_POINT_COUNT;i++)if(iq_value_quality(&values[i])==IQ_QUALITY_METER_VALUE) {
+                    invalid_hash=invalid_hash*33+i+1;if(!invalid_count++)first=iq_points[i].key;
+                }
+                if(invalid_hash!=previous_invalid&&invalid_count) {
+                    char detail[160];snprintf(detail,sizeof(detail),"%u points have invalid meter operands; first: %s. Inspect raw readings and meter display.",invalid_count,first);
+                    iq_event("quality","invalid_meter_input",1,detail);
+                }
+                previous_invalid=invalid_hash;
                 gateway_bacnet_update(values);next=now_ms()+100;
             }
             int64_t utc=0;(void)iq_clock_utc(&utc);
@@ -347,7 +361,10 @@ void app_main(void)
     ESP_ERROR_CHECK(nvs_open_from_partition("iqconfig","iqdata",NVS_READWRITE,&storage));
     iq_config_defaults(&settings);char text[1024],error[192];size_t size=sizeof(text);
     esp_err_t err=nvs_get_str(storage,"settings",text,&size);
-    if(err==ESP_OK&&!iq_config_parse(text,&settings,error,sizeof(error)))ESP_LOGE("iq_main","Stored config rejected: %s",error);
+    if(err==ESP_OK&&!iq_config_parse(text,&settings,error,sizeof(error))) {
+        iq_event("configuration","load_rejected",1,"Stored configuration rejected; commissioning defaults used");
+        ESP_LOGE("iq_main","Stored config rejected: %s",error);
+    }
     else if(err!=ESP_OK&&err!=ESP_ERR_NVS_NOT_FOUND)ESP_ERROR_CHECK(err);
     size=sizeof(update_token);err=nvs_get_str(storage,"update_token",update_token,&size);
     if(err==ESP_ERR_NVS_NOT_FOUND) {
