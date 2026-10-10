@@ -40,7 +40,9 @@ with exact failed checks, counters, pin snapshots and expandable protocol events
 Refresh does not trigger a read. Traces are cleared from the view when a changed
 boot ID is observed; their raw reply words are diagnostic evidence, not readings.
 `manage.py ... reboot` exposes the same empty-body command. Diagnostic events
-remain RAM-only. A random boot ID is exposed for precise reboot verification.
+include a RAM ring plus the [persistent error journal](ERROR_LOG.md). Maintenance
+provides refresh and download of the saved error history. A random boot ID is
+exposed for precise reboot verification and is retained in each saved error.
 
 The physical acceptance test `tests/test_dashboard.py` requires
 `playwright==1.55.0`, Chrome, existing private token/pin files, and both signed

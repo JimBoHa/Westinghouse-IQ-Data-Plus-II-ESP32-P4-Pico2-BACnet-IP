@@ -2,6 +2,7 @@
 #include "iq_management.h"
 #include "iq_health.h"
 #include "iq_diagnostics.h"
+#include "iq_error_log.h"
 #include "iq_security.h"
 #include "iq_config.h"
 #include <stdio.h>
@@ -24,7 +25,7 @@ static char token[65],mac_text[18],hostname[32];
 static esp_netif_t *netif;
 static iq_config_t settings;
 static void restart(void *unused)
-{ (void)unused;vTaskDelay(pdMS_TO_TICKS(500));esp_restart(); }
+{ (void)unused;vTaskDelay(pdMS_TO_TICKS(500));(void)iq_error_log_flush(1500);esp_restart(); }
 void iq_request_restart(void)
 { configASSERT(xTaskCreate(restart,"restart",2048,NULL,5,NULL)==pdPASS); }
 bool iq_check_token(const char *supplied)
@@ -49,6 +50,7 @@ cJSON *iq_status_json(void)
     cJSON_AddNumberToObject(j,"free_heap",esp_get_free_heap_size());
     cJSON_AddItemToObject(j,"config",iq_config_json(&settings));
     cJSON_AddItemToObject(j,"security",iq_security_json());cJSON_AddItemToObject(j,"clock",iq_clock_json());
+    cJSON_AddItemToObject(j,"persistent_errors",iq_error_log_status());
     char hash[65];for(unsigned i=0;i<32;++i)snprintf(hash+2*i,3,"%02x",app->app_elf_sha256[i]);
     cJSON_AddStringToObject(j,"elf_sha256",hash);
     esp_netif_ip_info_t ip={0};(void)esp_netif_get_ip_info(netif,&ip);char address[16];

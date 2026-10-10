@@ -147,7 +147,8 @@ static bool identify(cdc_acm_dev_hdl_t device)
         if(ch<32||ch>126||used+1>=sizeof(line)) { failure("Invalid Pico info response");return false; }
         line[used++]=(char)ch;
     }
-    failure("No Pico info response before 5-second deadline");return false;
+    if(!atomic_load(&stopping))failure("No Pico info response before 5-second deadline");
+    return false;
 }
 
 static bool transact(cdc_acm_dev_hdl_t device,iq_kind_t kind,uint32_t *flags)
@@ -159,11 +160,13 @@ static bool transact(cdc_acm_dev_hdl_t device,iq_kind_t kind,uint32_t *flags)
     if(!send(device,command,error,sizeof(error))) iq_stream_error(&stream,error);
     while(!stream.failed&&now_ms()<deadline) {
         xSemaphoreTake(status_lock,portMAX_DELAY);status.heartbeat_ms=now_ms();xSemaphoreGive(status_lock);
-        if(atomic_load(&stopping)) { iq_stream_error(&stream,"Shutdown requested; no retry");break; }
         if(atomic_load(&disconnected)) { iq_stream_error(&stream,"Pico USB disconnected");break; }
         if(atomic_load(&overflow)) { iq_stream_error(&stream,"USB receive buffer overflow");break; }
         int code=atomic_load(&driver_error);
         if(code) { snprintf(error,sizeof(error),"CDC driver error %d",code);iq_stream_error(&stream,error);break; }
+        if(atomic_load(&stopping)||atomic_load(&maintenance_requested)) {
+            iq_stream_cancel(&stream,"Read cancelled for planned shutdown or firmware maintenance");break;
+        }
         size_t n=xStreamBufferReceive(receive,bytes,sizeof(bytes),pdMS_TO_TICKS(10));
         if(n) iq_stream_feed(&stream,bytes,n);
         if(stream.terminal&&!drain_deadline) drain_deadline=now_ms()+100;
@@ -173,12 +176,14 @@ static bool transact(cdc_acm_dev_hdl_t device,iq_kind_t kind,uint32_t *flags)
     uint64_t finished=now_ms();
     xSemaphoreTake(model_lock,portMAX_DELAY);
     if(good) good=iq_model_accept(model,kind,stream.words,stream.word_count,finished,(finished-began)/1000.0,stream.stop,stream.malformed);
-    else iq_model_fail(model,kind,finished,(finished-began)/1000.0,stream.stop,stream.malformed);
+    else if(!stream.cancelled)iq_model_fail(model,kind,finished,(finished-began)/1000.0,stream.stop,stream.malformed);
+    /* A cancelled read supplies no new data: retain the previous sample and
+     * its original freshness deadline, without incrementing failure counters. */
     xSemaphoreGive(model_lock);
     iq_meter_transaction(&stream,finished-began,good);
     if(good&&kind==IQ_FLAGS&&flags) *flags=(stream.words[1]>>1)&0x7fffff;
     if(!good) {
-        failure(stream.failed?stream.error:"Invalid meter DATA buffer");
+        if(!stream.cancelled)failure(stream.failed?stream.error:"Invalid meter DATA buffer");
         if(!atomic_load(&disconnected)) (void)send(device,"abort\n",error,sizeof(error));
     } else {
         xSemaphoreTake(status_lock,portMAX_DELAY);status.last_success_ms=finished;status.last_error[0]=0;xSemaphoreGive(status_lock);
@@ -188,7 +193,7 @@ static bool transact(cdc_acm_dev_hdl_t device,iq_kind_t kind,uint32_t *flags)
 
 static void observe(cdc_acm_dev_hdl_t device)
 {
-    iq_observe_t probe;bool pending=false;
+    iq_observe_t probe;bool pending=false,cancelled=false;
     xSemaphoreTake(status_lock,portMAX_DELAY);
     if(observation.state==IQ_OBSERVE_QUEUED) {
         observation.state=IQ_OBSERVE_RUNNING;observation_active=true;probe=observation;pending=true;
@@ -201,6 +206,7 @@ static void observe(cdc_acm_dev_hdl_t device)
     while(probe.state!=IQ_OBSERVE_FAILED&&now_ms()<until) {
         xSemaphoreTake(status_lock,portMAX_DELAY);status.heartbeat_ms=now_ms();xSemaphoreGive(status_lock);
         if(atomic_load(&stopping)||atomic_load(&maintenance_requested)||settings->poll_enabled) {
+            cancelled=true;
             iq_observe_error(&probe,"Passive observation interrupted by maintenance or shutdown");break;
         }
         if(atomic_load(&disconnected)||atomic_load(&overflow)||atomic_load(&driver_error)) {
@@ -221,7 +227,7 @@ static void observe(cdc_acm_dev_hdl_t device)
     bool good=iq_observe_finish(&probe);probe.finished_ms=now_ms();
     memset(probe.line,0,sizeof(probe.line));
     xSemaphoreTake(status_lock,portMAX_DELAY);observation=probe;xSemaphoreGive(status_lock);
-    iq_event("usb",good?"passive_complete":"passive_failed",good?0:1,
+    iq_event("usb",good?"passive_complete":cancelled?"passive_cancelled":"passive_failed",good||cancelled?0:1,
         good?"Input-only capture completed; this does not validate meter telemetry":probe.error);
     if(!good&&!atomic_load(&disconnected)&&!atomic_load(&stopping)) {
         (void)send(device,"abort\n",error,sizeof(error));drain(4500);
@@ -342,6 +348,7 @@ static void poll_task(void *arg)
         uint32_t current_flags=0;
         bool good=transact(device,kind,&current_flags);
         next=began+1050;
+        if(atomic_load(&stopping)||atomic_load(&maintenance_requested))continue;
         fails[kind]=good?0:fails[kind]+1;
         if(kind!=IQ_STANDARD) {
             unsigned backoff=1000u<<(fails[kind]>9?9:fails[kind]);

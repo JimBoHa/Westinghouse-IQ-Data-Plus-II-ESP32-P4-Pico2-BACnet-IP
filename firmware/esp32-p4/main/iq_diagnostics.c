@@ -30,6 +30,7 @@ cJSON *iq_event_json(const iq_event_ring_t *ring)
     return j;
 }
 #ifdef ESP_PLATFORM
+#include "iq_error_log.h"
 #include <sys/time.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -59,14 +60,21 @@ void iq_diagnostics_init(void)
     mutex=xSemaphoreCreateMutex();configASSERT(mutex);
     unsigned char random[8];esp_fill_random(random,sizeof(random));
     for(unsigned i=0;i<8;i++)snprintf(boot_id+2*i,3,"%02x",random[i]);
-    iq_event("system","boot",esp_reset_reason(),"Gateway startup; prior RAM events are not retained");
+    iq_error_log_init();
+    esp_reset_reason_t reason=esp_reset_reason();
+    iq_event("system","boot",reason,"Gateway startup; error journal retained, transaction traces reset");
+    if(reason==ESP_RST_PANIC||reason==ESP_RST_INT_WDT||reason==ESP_RST_TASK_WDT||
+       reason==ESP_RST_WDT||reason==ESP_RST_BROWNOUT)
+        iq_event("system","unexpected_reset",reason,"Prior boot ended with panic, watchdog or brownout; reset reason recorded at startup");
 }
 void iq_event(const char *component,const char *event,int code,const char *detail)
 {
     if(!mutex)return;
     xSemaphoreTake(mutex,portMAX_DELAY);
     iq_event_append(&ring,monotonic_ms(),utc_now(),component,event,code,detail);
+    iq_event_t saved=ring.events[(ring.next+IQ_EVENT_CAPACITY-1)%IQ_EVENT_CAPACITY];
     xSemaphoreGive(mutex);
+    iq_error_log_submit(&saved);
 }
 void iq_meter_transaction(const iq_stream_t *stream,uint64_t host_elapsed_ms,bool accepted)
 {
@@ -74,6 +82,12 @@ void iq_meter_transaction(const iq_stream_t *stream,uint64_t host_elapsed_ms,boo
     xSemaphoreTake(mutex,portMAX_DELAY);
     iq_transaction_append(&transactions,stream,monotonic_ms(),utc_now(),host_elapsed_ms,accepted);
     xSemaphoreGive(mutex);
+    if(!accepted) {
+        char detail[160];
+        snprintf(detail,sizeof(detail),"%s: stop=%d words=%u malformed=%lu; %.80s",
+            iq_kind_name(stream->kind),stream->stop,stream->word_count,(unsigned long)stream->malformed,stream->error);
+        iq_event("meter",stream->cancelled?"transaction_cancelled":"transaction_failed",stream->cancelled?0:1,detail);
+    }
 }
 static void time_synced(struct timeval *time)
 {
@@ -122,6 +136,7 @@ cJSON *iq_diagnostics_json(void)
     cJSON *traces=iq_transaction_ring_json(meter);free(meter);
     if(!j||!traces){cJSON_Delete(j);cJSON_Delete(traces);return NULL;}
     cJSON_AddItemToObject(j,"meter_transactions",traces);
+    cJSON_AddItemToObject(j,"persistent_errors",iq_error_log_json(0,16));
     cJSON_AddStringToObject(j,"firmware_version",esp_app_get_description()->version);
     cJSON_AddStringToObject(j,"source_revision",IQ_SOURCE_REVISION);
     cJSON_AddStringToObject(j,"boot_id",boot_id);cJSON_AddItemToObject(j,"clock",iq_clock_json());return j;

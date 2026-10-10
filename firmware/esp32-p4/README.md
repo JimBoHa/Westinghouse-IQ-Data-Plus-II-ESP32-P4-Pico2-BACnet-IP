@@ -90,14 +90,14 @@ Keep the last working application binary and its build revision outside the chec
 
 Read transactions are limited to `all_standard`, `flags`, `settings`, and `trip`, with 500 ms Pico transactions and a bounded host deadline. Firmware checks firmware identity, ownership/provenance, request/completion images, counts, framing, repeat timing and terminal status. Unsupported or disconnected hardware never produces synthetic healthy meter readings. Diagnostic values fault independently; invalid fields do not contaminate valid siblings. Linux-only service-history health has no invented persistent equivalent.
 
-Measurements and rolling histories exist only in RAM. Model storage is approximately 1.4 MiB, with bounded power/energy histories. Rolling 15-minute/hour/day values remain invalid until the corresponding continuous window is available. Restart, gaps, invalid sources and energy-counter decrease break the appropriate continuity. No database, measurement snapshot, recording or history-download feature is linked into the P4 application.
+Measurements and rolling histories exist only in RAM. Model storage is approximately 1.4 MiB, with bounded power/energy histories. Rolling 15-minute/hour/day values remain invalid until the corresponding continuous window is available. Restart, gaps, invalid sources and energy-counter decrease break the appropriate continuity. No measurement database, snapshot or recording is linked into the P4 application. P4 0.4.7 adds a separate [1 MiB persistent error journal](docs/ERROR_LOG.md) and [specific point quality reasons](docs/QUALITY.md); error history can be downloaded from Maintenance.
 
 Authenticated [meter diagnostics](docs/DIAGNOSTICS.md) retain eight bounded
 transaction traces in RAM, including failed checks, host/Pico counters, pin
 snapshots and parsed protocol events. These transport traces can contain raw
 reply words; they do not form a measurement history and disappear at reboot.
 
-The exact CSV identifiers and descriptions are retained for compatibility. Health counters AI400–AI408 count this P4 session; the upstream descriptions refer to persistent `poll_health` state, which this database-free port does not retain across restarts. BI2 (display verified) stays inactive because this port has no recorded physical-display comparison. Linux service history has no P4 equivalent. These limitations must be considered when interpreting the unchanged point catalog.
+The exact CSV identifiers and descriptions are retained for compatibility. Health counters AI400–AI408 count this P4 session; the upstream descriptions refer to persistent `poll_health` state, which this port does not retain across restarts. The persistent error journal is separate from these counters. BI2 (display verified) stays inactive because this port has no recorded physical-display comparison. Linux service history has no P4 equivalent. These limitations must be considered when interpreting the unchanged point catalog.
 
 ## Tests
 

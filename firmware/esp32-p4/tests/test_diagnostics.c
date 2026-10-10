@@ -33,6 +33,19 @@ int main(void)
     assert(cJSON_GetObjectItem(cJSON_GetArrayItem(a,7),"sequence")->valueint==5);
     assert(cJSON_IsNull(cJSON_GetObjectItem(cJSON_GetArrayItem(a,0),"utc_ms")));
     cJSON_Delete(j);
+    iq_stream_init(&stream,IQ_STANDARD,0);
+    iq_stream_cancel(&stream,"Planned restart");
+    assert(stream.cancelled&&!iq_stream_finish(&stream));
+    iq_transaction_append(&meter,&stream,2000,0,500,false);
+    j=iq_transaction_ring_json(&meter);a=cJSON_GetObjectItem(j,"entries");
+    assert(!strcmp(cJSON_GetObjectItem(cJSON_GetArrayItem(a,0),"outcome")->valuestring,"cancelled"));
+    assert(cJSON_IsFalse(cJSON_GetObjectItem(cJSON_GetArrayItem(a,0),"buffer_accepted")));
+    cJSON_Delete(j);
+    iq_stream_init(&stream,IQ_STANDARD,0);
+    iq_stream_error(&stream,"Pico USB disconnected");
+    iq_stream_cancel(&stream,"Planned restart");
+    assert(!stream.cancelled&&!iq_stream_finish(&stream));
+    assert(!strcmp(stream.error,"Pico USB disconnected"));
     for(unsigned patch=7;patch<=9;patch++) {
         char identity[512],version[48];
         snprintf(identity,sizeof(identity),"{\"type\":\"info\",\"firmware\":\"iqdata-pico-live\",\"version\":\"0.4.%u\",\"build_board\":\"pico2\",\"live_enabled\":true,\"synthetic_host\":false,\"drive\":\"low_or_release\",\"pins\":{\"CLK\":0,\"RW\":1,\"DATA\":2,\"INT\":3}}",patch);

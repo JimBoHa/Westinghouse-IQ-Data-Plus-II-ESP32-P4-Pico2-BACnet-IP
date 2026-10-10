@@ -10,6 +10,7 @@ bool iq_health_sample(iq_health_gate_t *gate, uint64_t elapsed_ms, bool healthy)
 #ifdef ESP_PLATFORM
 #include <stdatomic.h>
 #include "iq_diagnostics.h"
+#include "iq_error_log.h"
 #include "esp_ota_ops.h"
 #include "esp_timer.h"
 #include "esp_system.h"
@@ -23,7 +24,10 @@ static bool (*health_check)(void);
 static void expired(void *unused)
 {
     (void)unused;
-    if (!atomic_load(&accepted)) { iq_event("ota","rollback_deadline",1,"Startup acceptance deadline expired");esp_restart(); }
+    if (!atomic_load(&accepted)) {
+        iq_event("ota","rollback_deadline",1,"Startup acceptance deadline expired");
+        (void)iq_error_log_flush(500);esp_restart();
+    }
 }
 void iq_health_begin(void)
 {
