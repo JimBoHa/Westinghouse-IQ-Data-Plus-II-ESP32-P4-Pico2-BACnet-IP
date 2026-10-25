@@ -57,7 +57,7 @@ def main():
         print(json.dumps(client.request("/api/auth/check", b"", authenticated=True), indent=2));return
     if args.command == "configure":
         data = args.json_file.read_bytes();config = json.loads(data)
-        if config.get("device_instance") == 75151 or config.get("ip") == "192.168.75.151":
+        if config.get("device_instance") == 75151 or config.get("ip") == "192.0.2.151":
             parser.error("Production IP and Device instance are protected")
         print(json.dumps(client.request("/api/config", data, authenticated=True), indent=2));return
     target = "pico2" if args.command == "pico-update" else "esp32p4"

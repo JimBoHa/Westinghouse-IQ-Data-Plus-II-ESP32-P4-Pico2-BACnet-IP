@@ -1,5 +1,8 @@
 # Browser dashboard
 
+> Privacy note: network addresses in this publication copy are anonymized examples. Original site records are kept outside this repository.
+
+
 Open `https://<gateway-hostname>.local/` on the same network. Pair with the CLI
 first and verify the browser certificate SHA-256 against the saved pin before
 trusting the device certificate. Do not load a private key into an unverified
@@ -23,7 +26,7 @@ Settings are reviewed before save. Saving safely stops the Pico interface and
 restarts the gateway; the page verifies a changed boot ID, health acceptance,
 and the saved configuration. For changed IP settings, reconnect by hostname
 if the current page used the old IP. Keep polling disabled until meter wiring
-and address are commissioned. Production Device 75151 and IP 192.168.75.151
+and address are commissioned. Production Device 75151 and IP 192.0.2.151
 remain protected by both page and firmware validation.
 
 Maintenance accepts a firmware file and its matching `.sig.json` manifest.

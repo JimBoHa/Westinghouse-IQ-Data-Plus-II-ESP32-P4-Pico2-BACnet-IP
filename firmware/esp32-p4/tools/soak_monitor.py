@@ -43,7 +43,7 @@ def parse_i_am(packet):
 
 
 def probe_bacnet(address, instance, port, timeout):
-    if address == "192.168.75.151" or instance == 75151 or not 0 <= instance < 4194303:
+    if address == "192.0.2.151" or instance == 75151 or not 0 <= instance < 4194303:
         raise ValueError("Protected or invalid BACnet target")
     bound = instance.to_bytes(3, "big")
     body = b"\x01\x00\x10\x08\x0b"+bound+b"\x1b"+bound

@@ -38,7 +38,7 @@ class Gateway:
             raise ValueError("Host must resolve to exactly one IPv4 address")
         self.address = addresses.pop()
         ip = ipaddress.ip_address(self.address)
-        if self.address == "192.168.75.151" or not ip.is_private or ip.is_multicast or ip.is_unspecified:
+        if self.address == "192.0.2.151" or not ip.is_private or ip.is_multicast or ip.is_unspecified:
             raise ValueError("Use an identified development gateway on the private LAN")
         self.timeout = timeout
         self.key = private_key(token_file) if token_file else None

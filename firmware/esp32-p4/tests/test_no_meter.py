@@ -25,7 +25,7 @@ def main():
                         help="Confirm that meter signal wiring is physically absent")
     parser.add_argument("--output", required=True, type=Path)
     args = parser.parse_args()
-    if str(args.target) == "192.168.75.151" or not args.target.is_private:
+    if str(args.target) == "192.0.2.151" or not args.target.is_private:
         parser.error("Only an identified private development gateway is allowed")
     if args.token_file.stat().st_mode & 0o077:
         parser.error("Token file must have mode 0600")

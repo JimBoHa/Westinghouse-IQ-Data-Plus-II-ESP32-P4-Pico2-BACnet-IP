@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parents[3]
 
 
 async def run(args):
-    if args.device == 75151 or args.target.split(":")[0] == "192.168.75.151":
+    if args.device == 75151 or args.target.split(":")[0] == "192.0.2.151":
         raise ValueError("The working production gateway is protected")
     app = Application.from_args(args)
     target, device = Address(args.target), ObjectIdentifier(("device", args.device))

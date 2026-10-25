@@ -25,7 +25,7 @@ async function api(path, options = {}) {
 }
 async function readStatus() {
   const next = await api("/api/status");
-  if (next.project !== "iqdata_p4_gateway" || next.config.device_instance === 75151 || (next.ethernet?.ip || next.ip) === "192.168.75.151") throw new Error("Protected or unexpected gateway; management blocked.");
+  if (next.project !== "iqdata_p4_gateway" || next.config.device_instance === 75151 || (next.ethernet?.ip || next.ip) === "192.0.2.151") throw new Error("Protected or unexpected gateway; management blocked.");
   if (!identity) identity = next.ethernet_mac;
   if (next.ethernet_mac !== identity) { key = undefined; access(); throw new Error("Gateway identity changed. Reload and verify its certificate."); }
   state = next; renderStatus(); return next;
@@ -164,7 +164,7 @@ function collectConfig() {
   for (const name of ["device_instance","bacnet_port","meter_address"]) next[name] = Number(form.elements[name].value);
   for (const name of ["name","ip","mask","gateway"]) next[name] = form.elements[name].value.trim();
   for (const name of ["dhcp","poll_enabled"]) next[name] = form.elements[name].checked;
-  if (next.device_instance === 75151 || next.ip === "192.168.75.151") throw new Error("Production Device 75151 and IP 192.168.75.151 are protected.");
+  if (next.device_instance === 75151 || next.ip === "192.0.2.151") throw new Error("Production Device 75151 and IP 192.0.2.151 are protected.");
   if (!/^[\x20-\x7e]{1,63}$/.test(next.name)) throw new Error("Device name must contain 1–63 printable ASCII characters.");
   return next;
 }

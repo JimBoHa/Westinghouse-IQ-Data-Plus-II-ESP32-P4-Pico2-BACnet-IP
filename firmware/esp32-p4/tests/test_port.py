@@ -279,7 +279,7 @@ class PortTests(unittest.TestCase):
     def test_commissioning_rejects_protected_or_malformed_configuration(self):
         base = dict(device_instance=75201, name="IQData-Test", dhcp=True, poll_enabled=False)
         self.assertTrue(self.call("config", text=json.dumps(base))["ok"])
-        for fields in (dict(device_instance=75151), dict(device_instance=4194303), dict(device_instance=True), dict(name=""), dict(unknown=1), dict(dhcp="true"), dict(meter_address=4096), dict(dhcp=False, ip="192.168.75.151", mask="255.255.255.0", gateway="192.168.75.1"), dict(dhcp=False, ip="192.168.75.0", mask="255.255.255.0", gateway="192.168.75.1")):
+        for fields in (dict(device_instance=75151), dict(device_instance=4194303), dict(device_instance=True), dict(name=""), dict(unknown=1), dict(dhcp="true"), dict(meter_address=4096), dict(dhcp=False, ip="192.0.2.151", mask="255.255.255.0", gateway="192.0.2.1"), dict(dhcp=False, ip="192.0.2.0", mask="255.255.255.0", gateway="192.0.2.1")):
             self.assertFalse(self.call("config", text=json.dumps(base | fields))["ok"], fields)
         self.assertFalse(self.call("config", text='{"device_instance":75201,"device_instance":75151,"name":"Test"}')["ok"])
 

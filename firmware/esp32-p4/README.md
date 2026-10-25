@@ -1,5 +1,8 @@
 # IQ Data Plus II on ESP32-P4 and plain Pico 2
 
+> Privacy note: network addresses in this publication copy are anonymized examples. Original site records are kept outside this repository.
+
+
 Development port derived from the original Raspberry Pi gateway. The Linux gateway remains available as a reference. This target runs C on ESP-IDF 5.5.5, hosts the Pico USB protocol, and exposes the original 198 BACnet points. See `ATTRIBUTION.md` for dependency and source provenance. Physical meter qualification is separate from the firmware and network tests.
 
 See [validation status](VALIDATION.md) for the tests actually completed and the remaining meter qualification.
@@ -74,7 +77,7 @@ Example configuration (select an unused identity and verify the meter address be
 {"device_instance":75201,"name":"IQData-P4-01","dhcp":true,"bacnet_port":47808,"meter_address":0,"poll_enabled":false}
 ```
 
-For four gateways, reserve distinct instances such as **75201–75204**, names `IQData-P4-01` through `IQData-P4-04`, and one DHCP reservation or validated static address per MAC. Check these identities are unused on the deployment network. For static networking supply `dhcp:false`, `ip`, `mask`, and `gateway`. The working gateway's **192.168.75.151 / 75151** is explicitly protected. No copied production address is a default.
+For four gateways, reserve distinct instances such as **75201–75204**, names `IQData-P4-01` through `IQData-P4-04`, and one DHCP reservation or validated static address per MAC. Check these identities are unused on the deployment network. For static networking supply `dhcp:false`, `ip`, `mask`, and `gateway`. The working gateway's **192.0.2.151 / 75151** is explicitly protected. No copied production address is a default.
 
 Management uses pinned HTTPS with one-use HMAC authentication. Pair the device and supply `--pin-file` to all client commands; see [security and signed updates](docs/SECURITY.md). Firmware uploads require an adjacent signed `.sig.json` manifest and the complete file's SHA-256. The P4 updater checks target chip/project and image integrity before changing boot selection. The new image must pass five consecutive one-second local health checks after a ten-second grace period. An independent 60-second reset deadline returns a stalled pending image to bootloader rollback. Management writes are blocked until validation passes. Status exposes the acceptance state and sample count. Meter/Ethernet availability is not required for the local startup self-check.
 
