@@ -18,7 +18,7 @@ cmake --build build/pico2
 build/p4-native/uf2_guard build/pico2/iqdata_pico_live.uf2
 ```
 
-Do not access, reconfigure, reboot, flash, or query the working gateway at **192.0.2.151 / Device 75151**. Never copy its database. Check development-device identity before writes. Preserve firmware/configuration backups outside the repository. Never erase the whole chip routinely, burn eFuses, or enable secure boot/encryption/anti-rollback during development.
+Do not access, reconfigure, reboot, flash, or query the working gateway at **the production gateway identified as Device 75151** (obtain its address from private commissioning records). Never copy its database. Check development-device identity before writes. Preserve firmware/configuration backups outside the repository. Never erase the whole chip routinely, burn eFuses, or enable secure boot/encryption/anti-rollback during development.
 
 Board: **ESP32-P4-WIFI6-POE-ETH**, ESP32-P4 rev 1.3, 32 MiB flash and PSRAM, IP101 PHY at address 1; MDC 31, MDIO 52, reset 51. USB-C is programming UART; USB-A is the Pico host. Keep the Pico on USB-A: user requires its firmware updates through ESP32 Ethernet. The meter was absent at bring-up. Preserve polling-disabled commissioning until a meter address and safe electrical setup are established.
 
