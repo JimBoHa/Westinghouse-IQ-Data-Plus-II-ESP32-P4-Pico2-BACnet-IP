@@ -1,5 +1,8 @@
 # IQ Data Plus II on ESP32-P4 and plain Pico 2
 
+> Privacy note: network addresses in this publication copy are anonymized examples. Original site records are kept outside this repository.
+
+
 Development port derived from the original Raspberry Pi gateway. The Linux gateway remains available as a reference. This target runs C on ESP-IDF 5.5.5, hosts the Pico USB protocol, and exposes the original 198 BACnet points. See `ATTRIBUTION.md` for dependency and source provenance. Physical meter qualification is separate from the firmware and network tests.
 
 See [validation status](VALIDATION.md) for the tests actually completed and the remaining meter qualification.

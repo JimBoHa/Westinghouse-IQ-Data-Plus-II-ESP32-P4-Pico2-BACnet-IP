@@ -39,7 +39,7 @@ bool iq_config_valid(const iq_config_t *s,char *error,size_t size)
         uint32_t ip,mask,gateway;
         if(!ip_number(s->ip,&ip)||!ip_number(s->mask,&mask)||!ip_number(s->gateway,&gateway))
             return bad(error,size,"Static IP, mask and gateway must be IPv4 addresses");
-        if(ip==0xc0a84b97u) return bad(error,size,"192.0.2.151 is protected");
+        if(ip==0xc0000297u) return bad(error,size,"192.0.2.151 is protected");
         uint32_t host=~mask;
         if(!mask||host<3||(host&(host+1))||!ip||(ip>>24)==127||ip>=0xe0000000u||
            !(ip&host)||(ip&host)==host||(gateway&&((gateway&mask)!=(ip&mask)||!(gateway&host)||(gateway&host)==host)))

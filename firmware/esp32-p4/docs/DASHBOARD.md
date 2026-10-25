@@ -1,5 +1,8 @@
 # Browser dashboard
 
+> Privacy note: network addresses in this publication copy are anonymized examples. Original site records are kept outside this repository.
+
+
 Open `https://<gateway-hostname>.local/` on the same network. Pair with the CLI
 first and verify the browser certificate SHA-256 against the saved pin before
 trusting the device certificate. Do not load a private key into an unverified
